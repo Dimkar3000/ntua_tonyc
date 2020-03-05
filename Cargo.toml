@@ -1,0 +1,8 @@
+[package]
+name = "ntua-tonyc"
+version = "0.0.1"
+authors = ["Dimitris Karagiannis <Dimkar3000@gmail.com>"]
+edition = "2018"
+
+[dependencies]
+#inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "llvm8-0" }
