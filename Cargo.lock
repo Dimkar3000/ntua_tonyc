@@ -2,4 +2,13 @@
 # It is not intended for manual editing.
 [[package]]
 name = "ntua-tonyc"
-version = "0.0.1"
+version = "0.1.0"
+dependencies = [
+ "peekmore",
+]
+
+[[package]]
+name = "peekmore"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2f636959803f2d4a6940034145d74589f744d483b2d5162b7476eb4d606714e"
