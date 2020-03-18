@@ -6,7 +6,6 @@ pub enum Token<'a> {
     Name(&'a str),
     CString(&'a str),
     CChar(char),
-
     KAnd,
     KBool,
     KChar,
@@ -33,13 +32,12 @@ pub enum Token<'a> {
     KSkip,
     KTail,
     KTrue,
-
     // Math Symbols
     Addition,
     Subtraction,
     Multiplication,
     Division,
-
+    Hash,
     // Logical Symbols
     Equal,
     NotEqual,
@@ -47,7 +45,6 @@ pub enum Token<'a> {
     LessOrEqual,
     Great,
     GreatOrEqual,
-
     // Seperator Symbols
     LParenthesis,
     RParenthesis,
@@ -57,21 +54,22 @@ pub enum Token<'a> {
     Semicolon,
     Colon,
     Assignement, // :=
-
     Empty,
-    Space, // Whitespace, tabs, etc..
+    NewLine, // Will be helpful with error messages
+    Space,   // Whitespace, tabs, etc..
     NotStarted,
-
     // Somehinγ that doen't get translated to ast node but I want to know what happend
     // Type(start, finish)
     Comment(usize, usize),
+    ErrorCRWithoutCF(usize),
     ErrorIntOverflow(usize, usize),
     ErrorCharDefenition(usize, usize),
+    ErrorCharSpecial(char), // \n \t \r " ' directly on the inpute stream,
     ErrorStringInComplete(usize, usize),
     ErrorNotParsed(char),
-    // + - * / #
 }
 
+#[derive(Debug)]
 pub struct Parser<'a> {
     pub token: Token<'a>,
     stream: &'a str,
@@ -134,6 +132,12 @@ impl<'a> Parser<'a> {
                     Ok(ch.unwrap())
                 }
             } // Escaped character should look to the next character,
+            // Special control character on the input stream, should be checked on there one
+            Some('\n') => Err(Token::ErrorCharSpecial('\n')),
+            Some('\r') => Err(Token::ErrorCharSpecial('\r')),
+            // Some('\t') => Err(Token::ErrorCharSpecial('\t')),
+            Some('\"') => Err(Token::ErrorCharSpecial('\"')),
+            Some('\'') => Err(Token::ErrorCharSpecial('\'')),
             Some(e) => Ok(e),
             // Some(e) => Token::Char(e), // General, not escaped character
             _ => Err(Token::ErrorCharDefenition(start, self.index)),
@@ -213,34 +217,32 @@ impl<'a> Parser<'a> {
                     self.token = match self.read_char() {
                         Ok(c) => {
                             let c0 = self.read_char();
-                            if c0.is_ok() {
-                                let ch = c0.ok().unwrap();
-                                // println!("{}", ch);
-                                if ch == '\'' {
-                                    Token::CChar(c)
-                                } else {
-                                    Token::ErrorCharDefenition(start, self.index)
-                                }
-                            } else {
-                                c0.err().unwrap()
+                            match c0 {
+                                Ok(_) => Token::ErrorCharDefenition(start,self.index),
+                                Err(Token::ErrorCharSpecial('\'')) => Token::CChar(c),
+                                Err(e) => e,
                             }
                         }
                         Err(e) => e,
                     }
                 }
                 '\"' => {
-                    let start = self.index;
                     // check that there is smething after the first tick
                     self.index += 1;
+                    let start = self.index;
                     let mut c = self.read_char();
-                    while c.is_ok() && (c != Ok('\"') && c != Ok('\n')) {
-                        self.index += 1;
-                        c = self.read_char()
+                    while c.is_ok()
+                        || (c.is_err() && c.as_ref().unwrap_err() == &Token::ErrorCharSpecial('\''))
+                    {
+                        c = self.read_char();
+                        // println!("{:?}", c);
                     }
                     self.index -= 1;
-                    self.token = match c {
-                        Ok('\"') => Token::CString(&self.stream[start + 1..self.index]),
-                        _ => Token::ErrorStringInComplete(start, self.index),
+                    // println!("{:?}",self.stream.chars().nth(self.index));
+                    self.token = match c.unwrap_err() {
+                        Token::ErrorCharSpecial('\"') => Token::CString(&self.stream[start..self.index]),
+                        _ => Token::ErrorStringInComplete(start,self.index),
+                         
                     }
                 }
                 '%' => {
@@ -260,6 +262,7 @@ impl<'a> Parser<'a> {
                 '*' => self.token = Token::Multiplication,
                 '/' => self.token = Token::Division,
                 '=' => self.token = Token::Equal,
+                '#' => self.token = Token::Hash,
                 '<' => {
                     // Possible: < <> <=
                     // Peek ahead to check which is the case
@@ -271,6 +274,37 @@ impl<'a> Parser<'a> {
                         Some(&'=') => {
                             self.index += 1;
                             Token::LessOrEqual
+                        }
+                        Some(&'*') => {
+                            // Multiline Comment block
+                            let start = self.index;
+
+                            // consume the *
+                            self.index += 1;
+                            chr.next();
+
+                            let token: Token;
+                            loop {
+                                let ch = chr.next();
+                                match ch {
+                                    Some('*') => {
+                                        self.index += 1;
+                                        if chr.peek() == Some(&'>') {
+                                            self.index += 1;
+                                            token = Token::Comment(start, self.index);
+                                            break;
+                                        } else {
+                                            continue;
+                                        }
+                                    }
+                                    None => {
+                                        token = Token::Comment(start, self.index);
+                                        break;
+                                    }
+                                    _ => self.index += 1,
+                                }
+                            }
+                            token
                         }
                         _ => Token::Less,
                     };
@@ -300,7 +334,15 @@ impl<'a> Parser<'a> {
                         _ => Token::Colon,
                     }
                 }
-                ' ' | '\n' | '\t' | '\r' => {
+                '\r' => {
+                    self.token = match chr.next() {
+                        Some('\n') => Token::NewLine,
+                        _ => Token::ErrorCRWithoutCF(self.index),
+                    };
+                    self.index += 1;
+                }
+                '\n' => self.token = Token::NewLine,
+                ' ' | '\t' => {
                     let mut ch = chr.next();
                     while ch.is_some()
                         && (ch.unwrap() == ' '
