@@ -1,23 +1,23 @@
 use core::fmt::Debug;
 use peekmore::PeekMore;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum TokenKind {
     Addition,
     Assignement,
-    CChar(char),
-    CString(String),
+    CChar,
+    CString,
     Colon,
     Comma,
-    Comment(usize, usize),
+    Comment,
     Division,
     Empty,
     Equal,
-    Error(String),
+    Error,
     Great,
     GreatOrEqual,
     Hash,
-    INT(i16),
+    INT,
     KAnd,
     KBool,
     KChar,
@@ -49,7 +49,7 @@ pub enum TokenKind {
     Less,
     LessOrEqual,
     Multiplication,
-    Name(String),
+    Name,
     NewLine,
     NotEqual,
     NotStarted,
@@ -61,57 +61,82 @@ pub enum TokenKind {
 }
 
 #[derive(Debug, Clone)]
+pub enum TokenExtra {
+    None,
+    
+    CString(String),
+    Error(String),
+    Name(String),
+    
+    Comment(usize, usize),
+    Cchar(char),
+    Number(i16),
+}
+
+
+#[derive(Debug, Clone)]
 pub struct Token {
-    pub kind: TokenKind,
-    col: usize,
-    line: usize,
+    kind: TokenKind,
+    pub col: usize,
+    pub line: usize,
+    pub extra: TokenExtra,
 }
 
 #[derive(Debug)]
 pub struct Parser {
-    pub token: Token,
+    token: Token,
     stream: String,
     index: usize,
-    column: usize,
-    line: usize,
+    pub column: usize,
+    pub line: usize,
     steps: Vec<usize>,
 }
 
 impl Token {
+    pub fn get_kind(&self) -> TokenKind {
+        self.kind
+    }
+
+    
     fn error(col: usize, line: usize, message: &str) -> Self {
         Token {
-            kind: TokenKind::Error(message.to_owned()),
+            kind: TokenKind::Error,
             col,
             line,
+            extra: TokenExtra::None,
         }
     }
     fn int(col: usize, line: usize, stream: &str) -> Self {
         match stream.parse::<i16>() {
             Ok(e) => Token {
-                kind: TokenKind::INT(e),
+                kind: TokenKind::INT,
                 col,
                 line,
+                extra: TokenExtra::Number(e),
             },
             Err(_) => Token {
-                kind: TokenKind::Error("".to_owned()),
+                kind: TokenKind::Error,
                 col,
                 line,
+                extra: TokenExtra::Error("Parser: Int overflow".to_owned()),
             },
         }
     }
 
     fn cchar(col: usize, line: usize, c: char) -> Self {
         Token {
-            kind: TokenKind::CChar(c),
+            kind: TokenKind::CChar,
             col,
             line,
+            extra: TokenExtra::Cchar(c)
         }
     }
     fn cstring(col: usize, line: usize, stream: String) -> Self {
         Token {
-            kind: TokenKind::CString(stream),
+            kind: TokenKind::CString,
             col,
             line,
+            extra: TokenExtra::CString(stream),
         }
     }
     fn from_word(col: usize, line: usize, stream: &str) -> Self {
@@ -120,137 +145,164 @@ impl Token {
                 kind: TokenKind::KAnd,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "bool" => Token {
                 kind: TokenKind::KBool,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "char" => Token {
                 kind: TokenKind::KChar,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "decl" => Token {
                 kind: TokenKind::KDecl,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "def" => Token {
                 kind: TokenKind::KDef,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "else" => Token {
                 kind: TokenKind::KElse,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "elsif" => Token {
                 kind: TokenKind::KElseif,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "end" => Token {
                 kind: TokenKind::KEnd,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "exit" => Token {
                 kind: TokenKind::KExit,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "false" => Token {
                 kind: TokenKind::KFalse,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "for" => Token {
                 kind: TokenKind::KFor,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "head" => Token {
                 kind: TokenKind::KHead,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "if" => Token {
                 kind: TokenKind::KIf,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "int" => Token {
                 kind: TokenKind::KInt,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "list" => Token {
                 kind: TokenKind::KList,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "mod" => Token {
                 kind: TokenKind::KMod,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "new" => Token {
                 kind: TokenKind::KNew,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "nil" => Token {
                 kind: TokenKind::KNil,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "nil?" => Token {
                 kind: TokenKind::KNilQ,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "not" => Token {
                 kind: TokenKind::KNot,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "or" => Token {
                 kind: TokenKind::KOr,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "ref" => Token {
                 kind: TokenKind::KRef,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "return" => Token {
                 kind: TokenKind::KReturn,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "skip" => Token {
                 kind: TokenKind::KSkip,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "tail" => Token {
                 kind: TokenKind::KTail,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
             "true" => Token {
                 kind: TokenKind::KTrue,
                 col,
                 line,
+                extra: TokenExtra::None,
             },
 
             e => Token {
-                kind: TokenKind::Name(e.to_owned()),
+                kind: TokenKind::Name,
                 col,
                 line,
+                extra: TokenExtra::Name(e.to_owned()),
             },
         }
     }
@@ -263,6 +315,7 @@ impl Parser {
                 kind: TokenKind::NotStarted,
                 col: 0,
                 line: 0,
+                extra: TokenExtra::None,
             },
             stream: stream.into(),
             index: 0,
@@ -271,6 +324,10 @@ impl Parser {
             steps: Vec::new(),
         }
     }
+    pub fn read_token(&self) -> Token {
+        self.token.clone()
+    }
+    
 
     // try to read a single character from the sream
     // Ok: the character read and how much I advanced the index,
@@ -454,9 +511,10 @@ impl Parser {
                         ch = chr.next();
                     }
                     self.token = Token {
-                        kind: TokenKind::Comment(start, self.index),
+                        kind: TokenKind::Comment,
                         col: self.column,
                         line: self.line,
+                        extra: TokenExtra::Comment(start, self.index),
                     };
                 }
 
@@ -465,6 +523,7 @@ impl Parser {
                         kind: TokenKind::Addition,
                         col: self.column,
                         line: self.line,
+                        extra: TokenExtra::None,
                     }
                 }
                 '-' => {
@@ -472,6 +531,7 @@ impl Parser {
                         kind: TokenKind::Subtraction,
                         col: self.column,
                         line: self.line,
+                        extra: TokenExtra::None,
                     }
                 }
                 '*' => {
@@ -479,6 +539,7 @@ impl Parser {
                         kind: TokenKind::Multiplication,
                         col: self.column,
                         line: self.line,
+                        extra: TokenExtra::None,
                     }
                 }
                 '/' => {
@@ -486,6 +547,7 @@ impl Parser {
                         kind: TokenKind::Division,
                         col: self.column,
                         line: self.line,
+                        extra: TokenExtra::None,
                     }
                 }
                 '=' => {
@@ -493,6 +555,7 @@ impl Parser {
                         kind: TokenKind::Equal,
                         col: self.column,
                         line: self.line,
+                        extra: TokenExtra::None,
                     }
                 }
                 '#' => {
@@ -500,6 +563,7 @@ impl Parser {
                         kind: TokenKind::Hash,
                         col: self.column,
                         line: self.line,
+                        extra: TokenExtra::None,
                     }
                 }
                 '<' => {
@@ -513,6 +577,7 @@ impl Parser {
                                 kind: TokenKind::NotEqual,
                                 col: self.column,
                                 line: self.line,
+                                extra: TokenExtra::None,
                             }
                         }
                         Some(&'=') => {
@@ -522,6 +587,7 @@ impl Parser {
                                 kind: TokenKind::LessOrEqual,
                                 col: self.column,
                                 line: self.line,
+                                extra: TokenExtra::None,
                             }
                         }
                         Some(&'*') => {
@@ -544,9 +610,10 @@ impl Parser {
                                             self.index += 1;
                                             self.column += 1;
                                             token = Token {
-                                                kind: TokenKind::Comment(start, self.index),
+                                                kind: TokenKind::Comment,
                                                 col: self.column,
                                                 line: self.line,
+                                                extra: TokenExtra::Comment(start, self.index),
                                             };
                                             break;
                                         } else {
@@ -555,9 +622,10 @@ impl Parser {
                                     }
                                     None => {
                                         token = Token {
-                                            kind: TokenKind::Comment(start, self.index),
+                                            kind: TokenKind::Comment,
                                             col: self.column,
                                             line: self.line,
+                                            extra: TokenExtra::Comment(start, self.index),
                                         };
                                         break;
                                     }
@@ -573,6 +641,7 @@ impl Parser {
                             kind: TokenKind::Less,
                             col: self.column,
                             line: self.line,
+                            extra: TokenExtra::None,
                         },
                     };
                 }
@@ -585,12 +654,14 @@ impl Parser {
                                 kind: TokenKind::GreatOrEqual,
                                 col: self.column,
                                 line: self.line,
+                                extra: TokenExtra::None,
                             }
                         }
                         _ => Token {
                             kind: TokenKind::Great,
                             col: self.column,
                             line: self.line,
+                            extra: TokenExtra::None,
                         },
                     }
                 }
@@ -600,6 +671,7 @@ impl Parser {
                         kind: TokenKind::LParenthesis,
                         col: self.column,
                         line: self.line,
+                        extra: TokenExtra::None,
                     }
                 }
                 ')' => {
@@ -607,6 +679,7 @@ impl Parser {
                         kind: TokenKind::RParenthesis,
                         col: self.column,
                         line: self.line,
+                        extra: TokenExtra::None,
                     }
                 }
                 '[' => {
@@ -614,6 +687,7 @@ impl Parser {
                         kind: TokenKind::LBracket,
                         col: self.column,
                         line: self.line,
+                        extra: TokenExtra::None,
                     }
                 }
                 ']' => {
@@ -621,6 +695,7 @@ impl Parser {
                         kind: TokenKind::RBracket,
                         col: self.column,
                         line: self.line,
+                        extra: TokenExtra::None,
                     }
                 }
                 ',' => {
@@ -628,6 +703,7 @@ impl Parser {
                         kind: TokenKind::Comma,
                         col: self.column,
                         line: self.line,
+                        extra: TokenExtra::None,
                     }
                 }
                 ';' => {
@@ -635,6 +711,7 @@ impl Parser {
                         kind: TokenKind::Semicolon,
                         col: self.column,
                         line: self.line,
+                        extra: TokenExtra::None,
                     }
                 }
                 ':' => {
@@ -645,12 +722,14 @@ impl Parser {
                                 kind: TokenKind::Assignement,
                                 col: self.column,
                                 line: self.line,
+                                extra: TokenExtra::None,
                             }
                         }
                         _ => Token {
                             kind: TokenKind::Colon,
                             col: self.column,
                             line: self.line,
+                            extra: TokenExtra::None,
                         },
                     }
                 }
@@ -663,6 +742,7 @@ impl Parser {
                                 kind: TokenKind::NewLine,
                                 col: self.column,
                                 line: self.line,
+                                extra: TokenExtra::None,
                             }
                         }
                         _ => Token::error(
@@ -681,6 +761,7 @@ impl Parser {
                             kind: TokenKind::NewLine,
                             col: self.column,
                             line: self.line,
+                            extra: TokenExtra::None,
                         }
                     }
                 }
@@ -700,6 +781,7 @@ impl Parser {
                         kind: TokenKind::Space,
                         col: self.column,
                         line: self.line,
+                        extra: TokenExtra::None,
                     };
                 }
                 e => {
@@ -715,6 +797,7 @@ impl Parser {
                 kind: TokenKind::Empty,
                 col: self.column,
                 line: self.line,
+                extra: TokenExtra::None,
             };
         }
         self.index += 1;
