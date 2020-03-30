@@ -89,8 +89,7 @@ impl AstRoot {
                         Ok(e) => VarType::List(Box::new(e)),
                         Err(e) => return Err(e),
                     }
-                    
-                },
+                }
                 _ => {
                     return Err(AstError::with_message(
                         self.parser.column,
@@ -110,7 +109,7 @@ impl AstRoot {
 
                 _ => unreachable!("Token kind and extra should be consistent"),
             },
-            _ => unreachable!("var_type expects the token to be correct"),
+            e => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Wrong type passed: \"{:?}\"",e))),
         };
         //Handle array syntax
         loop {
@@ -146,7 +145,6 @@ impl AstRoot {
                 || kind == &TokenKind::KList
         );
         match self.var_type() {
-
             Ok(t) => loop {
                 // println!("{:?}", self.read_token().get_kind());
                 match self.read_token().get_kind() {
@@ -160,11 +158,17 @@ impl AstRoot {
                         }
                         _ => unreachable!("both kind and extra should be name"),
                     },
-                    e => unreachable!("both kind and extra should be name: {:?}", e),
+                    e => {
+                        return Err(AstError::with_message(
+                            self.parser.column,
+                            self.parser.line,
+                            &format!("Ast: Expected name definition, found \"{:?}\"", e),
+                        ))
+                    }
                 }
             },
             Err(e) => return Err(e.extend("Ast: variable definition failed")),
-            _ => unimplemented!("not now"),
+            
         };
         Ok(results)
     }

@@ -5,6 +5,8 @@ mod ast;
 mod intinsics;
 mod parser;
 
+use crate::ast::VarDef;
+use crate::ast::AstError;
 use allocator::{Allocation, BumpAllocator};
 use parser::{Parser, Token, TokenKind};
 
@@ -49,21 +51,41 @@ fn test_alloc() {
     let c = a.alloc("item: T");
     println!("here: {}", c);
 }
+
 use ast::AstRoot;
+fn test_string_varDef(stream :&str) -> Result<Vec<VarDef>,AstError> {
+    println!("ast test: {}",stream);
+    let mut ast = AstRoot::new(stream);
+    ast.parser.next_token();
+    let c= ast.var_def();
+    println!("{:?}", c); 
+    c
+}
+fn test_ast() {
+    let mut a = test_string_varDef("list[int][][] i, y <*test*>");
+    assert!(a.is_ok());
+    a = test_string_varDef("list[int][][] 5i, y <*test*>");
+    assert!(a.is_err());
+    
+    // Doesnlt recognise y, this is correct 
+    a = test_string_varDef("list[int][][] i y <*test*>");
+    assert!(a.unwrap().len() == 1);
+
+    a = test_string_varDef("list[i][][] i y <*test*>");
+    assert!(a.is_err());
+}
+
+
 fn main() {
     test_parser();
     let stream = std::fs::read_to_string("./files/examples/hanoi.t").unwrap();
     test_string(&stream);
 
     test_alloc();
+    test_ast();
     // println!("{:?}", fs::read_dir(".").unwrap().collect::<Vec<_>>());
     // let mut ast = Ast::new(&stream);
     // ast.generate();
     // ast.print_tree();
-    println!("test: list[int][][] i, y");
-    let mut ast = AstRoot::new("list[int][][] i, y");
-    ast.parser.next_token();
-    let c= ast.var_def();
-    println!("{:?}", c); 
     
 }
