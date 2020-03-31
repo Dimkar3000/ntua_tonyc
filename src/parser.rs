@@ -63,20 +63,17 @@ pub enum TokenKind {
 #[derive(Debug, Clone)]
 pub enum TokenExtra {
     None,
-    
     CString(String),
     Error(String),
     Name(String),
-    
     Comment(usize, usize),
     Cchar(char),
     Number(i16),
 }
 
-
 #[derive(Debug, Clone)]
 pub struct Token {
-    kind: TokenKind,
+    pub kind: TokenKind,
     pub col: usize,
     pub line: usize,
     pub extra: TokenExtra,
@@ -85,8 +82,8 @@ pub struct Token {
 #[derive(Debug)]
 pub struct Parser {
     token: Token,
-    stream: String,
-    index: usize,
+    pub stream: String,
+    pub index: usize,
     pub column: usize,
     pub line: usize,
     steps: Vec<usize>,
@@ -97,7 +94,6 @@ impl Token {
         self.kind
     }
 
-    
     fn error(col: usize, line: usize, message: &str) -> Self {
         Token {
             kind: TokenKind::Error,
@@ -128,7 +124,7 @@ impl Token {
             kind: TokenKind::CChar,
             col,
             line,
-            extra: TokenExtra::Cchar(c)
+            extra: TokenExtra::Cchar(c),
         }
     }
     fn cstring(col: usize, line: usize, stream: String) -> Self {
@@ -327,7 +323,6 @@ impl Parser {
     pub fn read_token(&self) -> Token {
         self.token.clone()
     }
-    
 
     // try to read a single character from the sream
     // Ok: the character read and how much I advanced the index,
@@ -415,6 +410,15 @@ impl Parser {
 
     pub fn next_token(&mut self) {
         self.steps.push(self.index);
+        if self.index == self.stream.len() {
+            self.token = Token {
+                kind: TokenKind::Empty,
+                col: self.column,
+                line: self.line,
+                extra: TokenExtra::None,
+            };
+            return;
+        }
         let mut chr = self.stream[self.index..].chars().peekmore();
         // println!("Index: {:?}", self.index);
         // println!("Remaining: {:?}", self.stream[self.index..].to_string());
