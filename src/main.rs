@@ -5,6 +5,7 @@ mod ast;
 mod intinsics;
 mod parser;
 
+
 use crate::ast::AstError;
 use crate::ast::Atomic;
 use crate::ast::Expr;
@@ -189,14 +190,14 @@ fn test_ast() {
 }
 
 fn main() {
-    test_parser();
-    test_alloc();
-    test_ast();
+    // test_parser();
+    // test_alloc();
+    // test_ast();
     let stream = std::fs::read_to_string("./files/examples/hanoi.t").unwrap();
     let mut ast = AstRoot::new(stream);
     ast.parser.get_token();
     let a = ast.func_def();
-    println!("\n\n{:#?}",a.unwrap());
+    println!("\n\n{:#?}",a);
 
     // println!("{:?}", fs::read_dir(".").unwrap().collect::<Vec<_>>());
     // let mut ast = Ast::new(&stream);
