@@ -168,7 +168,7 @@ pub enum Stmt {
 pub struct AstRoot {
     // allocator: BumpAllocator,
     pub parser: Parser,
-    pub symbol_table: SymbolTable,
+    pub symbol_table: SymbolTable<TypeDecl>,
 }
 
 impl AstRoot {
@@ -412,7 +412,7 @@ impl AstRoot {
                     // self.parser.get_token();
                     let d = n.to_string();
                     match self.symbol_table.lookup(n) {
-                        Some(i) => Atomic::FuncCall(i.ctype.clone(), d, args),
+                        Some(i) => Atomic::FuncCall(i.data.clone(), d, args),
                         None => {
                             return Err(AstError::with_message(
                                 self.parser.column,
@@ -425,7 +425,7 @@ impl AstRoot {
                 _ => {
                     // self.parser.back();
                     match self.symbol_table.lookup(&n) {
-                        Some(i) => Atomic::Name(i.ctype.clone(), n),
+                        Some(i) => Atomic::Name(i.data.clone(), n),
                         None => {
                             return Err(AstError::with_message(
                                 self.parser.column,
