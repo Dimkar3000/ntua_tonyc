@@ -5,7 +5,6 @@ mod ast;
 mod intinsics;
 mod parser;
 
-
 use crate::ast::AstError;
 use crate::ast::Atomic;
 use crate::ast::Expr;
@@ -113,7 +112,6 @@ fn test_string_expr(stream: &str) -> Result<Expr, AstError> {
     c
 }
 
-
 fn test_ast() {
     let mut a = test_string_var_def("list[int][][] i, y <*test*>");
     assert!(a.is_ok());
@@ -145,17 +143,16 @@ fn test_ast() {
     assert!(a.is_ok());
     a = test_string_stmt("if rings >= 1:\nhanoi(rings-1, source, auxiliary, target)\nmove(source, target)\nhanoi(rings-1, auxiliary, target, source)\nend");
     assert!(a.is_ok());
-    
+
     a = test_string_stmt("if rings >= 1:\nhanoi(rings-1, source, auxiliary, target)\nelif 4 > 5 : \nmove(source, target)\nelif 3 > 2 : \nhanoi(rings-1, auxiliary, target, source)\nelse: makakas(i)\nend");
     assert!(a.is_ok());
-    
+
     a = test_string_stmt("if rings >= 1:\na:=5\nhanoi(rings-1, source, auxiliary, target)\nmove(source, target)\nhanoi(rings-1, auxiliary, target, source)\nend");
     assert!(a.is_ok());
 
     a = test_string_stmt("for number := 6; number <= limit; number := number + 6:\na := 5\nend");
     assert!(a.is_ok());
 
-    
     a = test_string_stmt("a := 5");
     assert!(a.is_ok());
 
@@ -182,7 +179,7 @@ fn test_ast() {
     assert!(a.is_ok());
     a = test_string_expr("a + 5 +");
     assert!(a.is_err());
-    
+
     a = test_string_expr("4 > 5");
     assert!(a.is_ok());
     a = test_string_expr("new list[int[]][5]");
@@ -197,7 +194,7 @@ fn main() {
     let mut ast = AstRoot::new(stream);
     ast.parser.get_token();
     let a = ast.func_def();
-    println!("\n\n{:#?}",a);
+    println!("\n\n{:#?}", a);
 
     // println!("{:?}", fs::read_dir(".").unwrap().collect::<Vec<_>>());
     // let mut ast = Ast::new(&stream);

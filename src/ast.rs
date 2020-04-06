@@ -1,5 +1,5 @@
-use core::fmt::Display;
 use crate::parser::Token;
+use core::fmt::Display;
 use std::collections::HashMap;
 // use crate::allocator::{Allocation, BumpAllocator};
 use crate::parser::{Parser, TokenExtra, TokenKind};
@@ -34,8 +34,6 @@ impl<'a> AstError {
         }
     }
 }
-
-
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum TypeDecl {
@@ -90,19 +88,19 @@ impl VarDef {
 
 #[derive(Debug, Clone)]
 pub enum Atomic {
-    Name(TypeDecl,String),
+    Name(TypeDecl, String),
     CString(String),
     Accessor(Rc<Atomic>, Rc<Expr>),
-    FuncCall(TypeDecl,String, Vec<Expr>),
+    FuncCall(TypeDecl, String, Vec<Expr>),
 }
 
 impl Atomic {
     pub fn get_type(&self) -> TypeDecl {
         match self {
-            Atomic::Name(t,_) => t.clone(),
+            Atomic::Name(t, _) => t.clone(),
             Atomic::CString(_) => TypeDecl::Array(Rc::new(TypeDecl::Char)),
-            Atomic::FuncCall(t,..) => t.clone(),
-            Atomic::Accessor(base,_) => base.get_type()
+            Atomic::FuncCall(t, ..) => t.clone(),
+            Atomic::Accessor(base, _) => base.get_type(),
         }
     }
 }
@@ -110,16 +108,15 @@ impl Atomic {
 #[derive(Debug, Clone)]
 pub enum Expr {
     Atomic(TypeDecl, Atomic),
-    
+
     CChar(char),
     // Parenthesis(TypeDecl, Rc<Expr>),
-
     CInt(i16),
-    Unary( TokenKind, Rc<Expr>),
-    Binary( TokenKind, Rc<Expr>, Rc<Expr>),
+    Unary(TokenKind, Rc<Expr>),
+    Binary(TokenKind, Rc<Expr>, Rc<Expr>),
 
     CBool(bool),
-    Negation( Rc<Expr>),
+    Negation(Rc<Expr>),
     Comparison(TokenKind, Rc<Expr>, Rc<Expr>),
     NilCheck(Rc<Expr>),
 
@@ -152,6 +149,7 @@ impl Expr {
 }
 
 type ElseIfBlock = Vec<(Expr, Vec<Stmt>)>;
+
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Exit,
@@ -168,61 +166,124 @@ pub enum Stmt {
     Call(String, Vec<Expr>),
 }
 
+#[derive(Debug, Clone)]
+struct Scope {
+    name: String,
+    locals: HashMap<String, SymbolEntry>,
+}
+
+impl Scope {
+    pub fn new<S: AsRef<str>>(name: S) -> Self {
+        Scope {
+            name: name.as_ref().to_owned(),
+            locals: HashMap::new(),
+        }
+    }
+    pub fn insert<S: AsRef<str>>(&mut self, name: S, ctype: TypeDecl) -> Result<(), String> {
+        assert_ne!(name.as_ref().to_owned().len(), 0);
+        if self.locals.contains_key(name.as_ref()) {
+            return Err(format!(
+                "Variable \"{}\" already defined in function: \"{}\" with Type: {:?}",
+                name.as_ref().to_owned(),
+                self.name,
+                ctype
+            ));
+        } else {
+            self.locals
+                .insert(name.as_ref().to_owned(), SymbolEntry::new(ctype));
+        }
+        Ok(())
+    }
+
+    pub fn lookup<S: AsRef<str>>(&self, name: S) -> Option<Rc<SymbolEntry>> {
+        let a = match self.locals.contains_key(name.as_ref()) {
+            true => Some(Rc::new(self.locals[name.as_ref()].clone())),
+            false => None,
+        };
+        if a.is_some() {
+            println!(
+                "lookup: name: {:?} of type {:?}, found in scope: {}",
+                name.as_ref(),
+                a.as_ref(),
+                self.name
+            );
+        }
+        a
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SymbolEntry {
+    ctype: TypeDecl,
+}
+
+impl SymbolEntry {
+    pub fn new(ctype: TypeDecl) -> Self {
+        SymbolEntry { ctype }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SymbolTable {
+    scopes: Vec<Scope>,
+}
+
+impl SymbolTable {
+    pub fn new() -> Self {
+        SymbolTable {
+            scopes: vec![Scope::new("root")], // the root scope should only have the main function
+        }
+    }
+
+    pub fn lookup<S: AsRef<str>>(&self, name: S) -> Option<Rc<SymbolEntry>> {
+        self.scopes
+            .iter()
+            .rev()
+            .find_map(|x| x.lookup(name.as_ref()))
+    }
+
+    pub fn insert<S: AsRef<str>>(&mut self, name: S, ctype: TypeDecl) -> Result<(), String> {
+        match self.scopes.last_mut() {
+            Some(k) => k.insert(name, ctype),
+            None => return Err("No current scope defined. this should never happen".to_owned()),
+        }
+    }
+
+    pub fn open_scope<S: AsRef<str>>(&mut self, name: S) {
+        // The name of the scope will be the function name
+        self.scopes.push(Scope::new(name))
+    }
+    pub fn close_scope(&mut self) {
+        self.scopes.pop();
+    }
+}
+
 pub struct AstRoot {
     // allocator: BumpAllocator,
     pub parser: Parser,
-    pub current_block_name: String,
-    pub name_map: HashMap<String, TypeDecl>,
+    pub symbol_table: SymbolTable,
 }
 
 impl AstRoot {
     pub fn new<T: Into<String>>(stream: T) -> Self {
-        AstRoot {
+        let mut result = AstRoot {
             // allocator: BumpAllocator::new(),
             parser: Parser::new(stream.into()),
-            current_block_name: "root".to_owned(),
-            name_map: HashMap::new(),
-        }
-    }
+            // current_block_name: Scope{name:"root".to_owned()},
+            symbol_table: SymbolTable::new(),
+        };
 
-    pub fn add_name<T: Into<String>>(&mut self, entry: T, ctype: &TypeDecl) {
-        self.name_map.insert(
-            format!("{}::{}", self.current_block_name, entry.into()),
-            ctype.clone(),
-        );
-    }
+        result.symbol_table.insert("puti", TypeDecl::Void).unwrap();
+        result.symbol_table.insert("putb", TypeDecl::Void).unwrap();
+        result.symbol_table.insert("putc", TypeDecl::Void).unwrap();
+        result.symbol_table.insert("puts", TypeDecl::Void).unwrap();
 
-    pub fn get_type<T: Display>(&self, entry: T) -> Option<TypeDecl> {
-        // Stand names
-        match &format!("{}",entry)[..] {
-            "puti" => return Some(TypeDecl::Void),
-            "putb" => return Some(TypeDecl::Void),
-            "putc" => return Some(TypeDecl::Void),
-            "puts" => return Some(TypeDecl::Void),
-            
-            "geti" => return Some(TypeDecl::Int),
-            "getb" => return Some(TypeDecl::Bool),
-            "getc" => return Some(TypeDecl::Char),
-            "gets" => return Some(TypeDecl::Array(Rc::new(TypeDecl::Char))),
-            
-            _=> ()
-            
-        }
+        result.symbol_table.insert("geti", TypeDecl::Void).unwrap();
+        result.symbol_table.insert("getb", TypeDecl::Void).unwrap();
+        result.symbol_table.insert("getc", TypeDecl::Void).unwrap();
+        result.symbol_table.insert("gets", TypeDecl::Void).unwrap();
 
-        
-        let mut backup = self.current_block_name.to_owned();
-        loop {
-            match self.name_map.get(&format!("{}::{}", backup, entry)) {
-                Some(i) => return Some(i.clone()),
-                None => (),
-            }
-            match backup.rfind("::") {
-                Some(x) => backup = backup[0..x].to_owned(),
-                None => return None,
-            }
-        }
-
-
+        result
     }
 
     fn read_token(&self) -> Token {
@@ -358,14 +419,6 @@ impl AstRoot {
     pub fn var_def(&mut self) -> Result<Vec<VarDef>, AstError> {
         let mut results = Vec::new();
         let kind = &self.read_token().get_kind();
-        // sanity check
-        // println!(
-        //     "{} {},{:?},{:?}",
-        //     self.parser.column,
-        //     self.parser.line,
-        //     self.read_token().get_kind(),
-        //     self.read_token().extra
-        // );
         if kind == &TokenKind::RParenthesis {
             return Ok(Vec::new());
         }
@@ -377,12 +430,20 @@ impl AstRoot {
         );
         match self.var_type() {
             Ok(t) => loop {
-                // println!("{:?}", self.read_token().get_kind());
                 match self.read_token().get_kind() {
                     TokenKind::Name => match self.parser.read_token().extra {
                         TokenExtra::Name(name) => {
                             results.push(VarDef::new(&name, t.clone()));
-                            self.add_name(name, &t);
+                            match self.symbol_table.insert(name, t.clone()) {
+                                Ok(_) => (),
+                                Err(e) => {
+                                    return Err(AstError::with_message(
+                                        self.parser.column,
+                                        self.parser.line,
+                                        &e,
+                                    ))
+                                }
+                            }
                             if self.parser.get_token().get_kind() != TokenKind::Comma {
                                 break;
                             }
@@ -401,14 +462,11 @@ impl AstRoot {
             },
             Err(e) => return Err(e.extend("Ast: variable definition failed")),
         };
-        
+
         Ok(results)
     }
 
     pub fn atom(&mut self) -> Result<Atomic, AstError> {
-        // println!("token: {:?}", self.read_token().get_kind());
-        // let mut t;
-        let mut name = "".to_owned();
         let base = match self.read_token() {
             Token {
                 kind: TokenKind::Name,
@@ -416,12 +474,9 @@ impl AstRoot {
                 ..
             } => match self.parser.get_token().kind {
                 TokenKind::LParenthesis => {
-                    // println!("here: {:?}", self.read_token());
-                    name = n.to_owned();
-                    let mut b = Vec::new();
+                    let mut args = Vec::new();
                     loop {
                         self.parser.get_token();
-                        // println!("token: {:?}", self.read_token().get_kind());
                         if self.read_token().get_kind() == TokenKind::RParenthesis {
                             break;
                         }
@@ -429,8 +484,7 @@ impl AstRoot {
                             Ok(k) => k,
                             Err(e) => return Err(e.extend("Ast: Function Arguments failed")),
                         };
-                        b.push(tmp);
-                        // println!("b = {:?}", b);
+                        args.push(tmp);
                         match self.read_token().get_kind() {
                             TokenKind::Comma => (),
                             TokenKind::RParenthesis => break,
@@ -450,17 +504,28 @@ impl AstRoot {
                     self.parser.get_token();
                     // self.parser.get_token();
                     let d = n.to_string();
-                    match self.get_type(n) {
-                        Some(i) => Atomic::FuncCall(i.clone(),d, b),
-                        None => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: Function name not defined: {}",d))),
+                    match self.symbol_table.lookup(n) {
+                        Some(i) => Atomic::FuncCall(i.ctype.clone(), d, args),
+                        None => {
+                            return Err(AstError::with_message(
+                                self.parser.column,
+                                self.parser.line,
+                                &format!("Ast: Function name not defined: {}", d),
+                            ))
+                        }
                     }
-                    
                 }
                 _ => {
                     // self.parser.back();
-                    match self.get_type(&n) {
-                        Some(i) => Atomic::Name(i,n),
-                        None => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: Variable name not defined: {}",n))),
+                    match self.symbol_table.lookup(&n) {
+                        Some(i) => Atomic::Name(i.ctype.clone(), n),
+                        None => {
+                            return Err(AstError::with_message(
+                                self.parser.column,
+                                self.parser.line,
+                                &format!("Ast: Variable name not defined: {}", n),
+                            ))
+                        }
                     }
                 }
             },
@@ -481,8 +546,6 @@ impl AstRoot {
                 ))
             }
         };
-        // println!("here: {:?}", base);
-        // println!("token: {:?}", self.read_token().get_kind());
         match self.parser.read_token().get_kind() {
             TokenKind::LBracket => {
                 self.parser.get_token();
@@ -492,15 +555,26 @@ impl AstRoot {
                 };
                 match b {
                     Expr::CInt(_) | Expr::Unary(..) | Expr::Binary(..) => (),
-                    Expr::Atomic(TypeDecl::Int,_) => (),
-                    e => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: expression inside bracket should reduce to intiger, but {:?}",e))),
-
+                    Expr::Atomic(TypeDecl::Int, _) => (),
+                    e => {
+                        return Err(AstError::with_message(
+                            self.parser.column,
+                            self.parser.line,
+                            &format!(
+                                "Ast: expression inside bracket should reduce to intiger, but {:?}",
+                                e
+                            ),
+                        ))
+                    }
                 }
                 match self.read_token().get_kind() {
                     TokenKind::RBracket => {
                         self.parser.get_token();
-                        let r = Atomic::Accessor(Rc::new(base), Rc::new(b)); 
-                        self.add_name(name, &r.get_type());
+                        let r = Atomic::Accessor(Rc::new(base), Rc::new(b));
+                        // match self.symbol_table.insert(name, r.get_type()) {
+                        //     Ok(()) => (),
+                        //     Err(e) => return Err(AstError::with_message(self.parser.column, self.parser.line, &e)),
+                        // }
                         return Ok(r);
                     }
                     e => {
@@ -513,10 +587,13 @@ impl AstRoot {
                 }
             }
             _ => {
-                self.add_name(name, &base.get_type());
-                return Ok(base)
-            },
-        };
+                // match self.symbol_table.insert(name, base.get_type()) {
+                //     Ok(()) => (),
+                //     Err(e) => return Err(AstError::with_message(self.parser.column, self.parser.line, &e)),
+                // }
+                Ok(base)
+            }
+        }
     }
 
     pub fn expr(&mut self) -> Result<Expr, AstError> {
@@ -753,7 +830,6 @@ impl AstRoot {
         };
 
         // Binary Operations
-        // println!("{:?}", self.read_token().get_kind());
         match self.read_token().get_kind() {
             TokenKind::Addition
             | TokenKind::Subtraction
@@ -787,7 +863,7 @@ impl AstRoot {
                     )),
 
                 };
-                Ok(Expr::Hash(ctype,Rc::new(left), Rc::new(right)))
+                Ok(Expr::Hash(ctype, Rc::new(left), Rc::new(right)))
             }
             TokenKind::Equal
             | TokenKind::NotEqual
@@ -858,11 +934,20 @@ impl AstRoot {
                 }
 
                 let args = self.formal_def()?;
-                // println!("here: {:?}", self.read_token().get_kind());
-                match t.clone() {
-                    Some(i) => self.add_name(&name, &i),
-                    None => self.add_name(&name, &TypeDecl::Void),
+                let a = match t.clone() {
+                    Some(i) => self.symbol_table.insert(&name, i),
+                    None => self.symbol_table.insert(&name, TypeDecl::Void),
                 };
+                match a {
+                    Ok(()) => (),
+                    Err(e) => {
+                        return Err(AstError::with_message(
+                            self.parser.column,
+                            self.parser.line,
+                            &e,
+                        ))
+                    }
+                }
                 return Ok(FuncDecl {
                     rtype: t,
                     name,
@@ -877,7 +962,6 @@ impl AstRoot {
                 ))
             }
         };
-        // println!("s1: {:?}",self.parser.get_token().get_kind());
     }
 
     pub fn func_def(&mut self) -> Result<FuncDef, AstError> {
@@ -913,9 +997,10 @@ impl AstRoot {
                         ))
                     }
                 };
-                
-                let old_name = self.current_block_name.to_owned();
-                self.current_block_name = format!("{}::{}", self.current_block_name, name);
+
+                // let old_name = self.current_block_name.to_owned();
+                // self.current_block_name = format!("{}::{}", self.current_block_name, name);
+                self.symbol_table.open_scope(&name);
                 if self.read_token().get_kind() != TokenKind::LParenthesis {
                     return Err(AstError::with_message(
                         self.parser.column,
@@ -925,11 +1010,22 @@ impl AstRoot {
                 }
 
                 let args = self.formal_def()?;
-                match t.clone() {
-                    Some(i) => self.add_name(&name, &i),
-                    None => self.add_name(&name, &TypeDecl::Void),
+                let a = match t.clone() {
+                    Some(i) => self.symbol_table.insert(&name, i),
+                    None => self.symbol_table.insert(&name, TypeDecl::Void),
                 };
-                
+
+                match a {
+                    Ok(()) => (),
+                    Err(e) => {
+                        return Err(AstError::with_message(
+                            self.parser.column,
+                            self.parser.line,
+                            &e,
+                        ))
+                    }
+                }
+
                 let mut defs = Vec::new();
                 let mut decls = Vec::new();
                 let mut vars = Vec::new();
@@ -949,12 +1045,24 @@ impl AstRoot {
                 while self.read_token().get_kind() != TokenKind::KEnd {
                     stmts.push(self.stmt()?);
                 }
-                self.parser.get_token();
-                self.current_block_name = old_name;
-                match t.clone() {
-                    Some(i) => self.add_name(&name, &i),
-                    None => self.add_name(&name, &TypeDecl::Void),
+                // self.parser.get_token();
+                // self.current_block_name = old_name;
+                self.symbol_table.close_scope();
+                let a = match t.clone() {
+                    Some(i) => self.symbol_table.insert(&name, i),
+                    None => self.symbol_table.insert(&name, TypeDecl::Void),
                 };
+
+                match a {
+                    Ok(()) => (),
+                    Err(e) => {
+                        return Err(AstError::with_message(
+                            self.parser.column,
+                            self.parser.line,
+                            &e,
+                        ))
+                    }
+                }
                 Ok(FuncDef {
                     rtype: t,
                     name: name,
@@ -973,7 +1081,6 @@ impl AstRoot {
                 ))
             }
         }
-        // println!("s1: {:?}", self.parser.get_token().get_kind());
     }
 
     pub fn stmt(&mut self) -> Result<Stmt, AstError> {
@@ -1100,7 +1207,6 @@ impl AstRoot {
                 let mut elseifs = ElseIfBlock::new();
                 let mut elseblock = Vec::new();
                 let mut stmts = Vec::new();
-                // println!("here: {:?}", self.read_token().get_kind());
                 match self.read_token().get_kind() {
                     TokenKind::Colon => (),
                     c => {
@@ -1113,7 +1219,6 @@ impl AstRoot {
                 }
                 self.parser.get_token();
                 //if block
-                // println!("if: {:?}", self.read_token().get_kind());
                 while self.read_token().get_kind() != TokenKind::KElseif
                     && self.read_token().get_kind() != TokenKind::KElse
                     && self.read_token().get_kind() != TokenKind::KEnd
@@ -1121,7 +1226,6 @@ impl AstRoot {
                     stmts.push(self.stmt()?);
                 }
                 // self.parser.get_token();
-                // println!("elseif: {:?}", self.read_token().get_kind());
                 while self.read_token().get_kind() == TokenKind::KElseif {
                     self.parser.get_token();
                     let cond = self.expr()?;
@@ -1206,7 +1310,6 @@ impl AstRoot {
                 ))
             }
         };
-        // println!("{:?}", self.parser.read_token().get_kind());
         let mut results = Vec::new();
         loop {
             let is_ref = match self.parser.read_token().get_kind() {
@@ -1221,18 +1324,14 @@ impl AstRoot {
                 Ok(v) => v,
                 Err(e) => return Err(e.extend("Ast: Inside formal")),
             };
-            let i = defs.iter().map(|x| {
-                self.add_name(&x.name, &x.var_type);
-                FormalDecl {
+            let i = defs.iter().map(|x| FormalDecl {
                 is_ref,
                 def: VarDef::new(&x.name, x.var_type.clone()),
-            }});
+            });
             results.extend(i);
-            // println!("{:?}", self.parser.read_token().get_kind());
             match self.parser.read_token().get_kind() {
                 TokenKind::Semicolon => self.parser.get_token(),
                 TokenKind::RParenthesis => {
-                    // println!("here");
                     self.parser.get_token();
                     break;
                 }
@@ -1244,7 +1343,6 @@ impl AstRoot {
                     ))
                 }
             };
-            // println!("{:?}", self.parser.read_token().get_kind());
         }
         self.parser.get_token();
         Ok(results)
