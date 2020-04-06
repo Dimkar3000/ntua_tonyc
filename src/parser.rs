@@ -94,7 +94,7 @@ impl Token {
         self.kind
     }
 
-    fn error(col: usize, line: usize, message: &str) -> Self {
+    fn error(col: usize, line: usize, _message: &str) -> Self {
         Token {
             kind: TokenKind::Error,
             col,
@@ -402,11 +402,11 @@ impl Parser {
         self.token.clone()
     }
 
-    pub fn back(&mut self) {
-        self.index = self.steps.pop().unwrap_or(0);
-        self.index = self.steps.pop().unwrap_or(0);
-        self.next_token();
-    }
+    // pub fn back(&mut self) {
+    //     self.index = self.steps.pop().unwrap_or(0);
+    //     self.index = self.steps.pop().unwrap_or(0);
+    //     self.next_token();
+    // }
 
     pub fn next_token(&mut self) {
         self.steps.push(self.index);

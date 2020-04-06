@@ -11,6 +11,7 @@ impl Debug for BumpAllocator {
     }
 }
 
+#[allow(dead_code)]
 impl BumpAllocator {
     pub fn new() -> Self {
         BumpAllocator {
@@ -19,6 +20,7 @@ impl BumpAllocator {
     }
 }
 
+#[allow(dead_code)]
 impl Drop for BumpAllocator {
     fn drop(&mut self) {
         self.allocator.reset();
@@ -32,12 +34,14 @@ pub trait Allocation<T> {
     fn dealloc(&self);
 }
 
+#[allow(dead_code)]
 impl BumpAllocator {
     pub fn alloc_string(&mut self, s: &str) -> &mut str {
         self.allocator.alloc_str(s)
     }
 }
 
+#[allow(dead_code)]
 impl<T> Allocation<T> for BumpAllocator {
     fn alloc(&mut self, item: T) -> &mut T {
         self.allocator.alloc(item)
