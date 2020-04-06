@@ -4,7 +4,7 @@ mod allocator;
 mod ast;
 mod intinsics;
 mod parser;
-
+mod symbol_table;
 use ast::AstRoot;
 
 // fn test_string_parser(s: &str) {
