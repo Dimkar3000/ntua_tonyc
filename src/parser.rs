@@ -394,6 +394,7 @@ impl Parser {
             match c {
                 TokenKind::NewLine => (),
                 TokenKind::Space => (),
+                TokenKind::Comment => (),
                 _ => break,
             }
             self.next_token();

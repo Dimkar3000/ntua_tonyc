@@ -1091,11 +1091,15 @@ impl AstRoot {
                 Ok(Stmt::Return(Rc::new(self.expr()?)))
             }
             TokenKind::KFor => {
+                println!("{:?}",self.read_token());
                 self.parser.get_token();
+                println!("{:?}",self.read_token());
                 let mut first_simples = Vec::new();
                 loop {
                     let s = self.stmt()?;
-                    match s {
+                    println!("stmt{:?}",s);
+                    println!("{:?}",self.read_token());
+                match s {
                         Stmt::Skip | Stmt::Assign(..) | Stmt::Call(..) => (),
                         e => {
                             return Err(AstError::with_message(
@@ -1107,7 +1111,10 @@ impl AstRoot {
                     }
                     first_simples.push(s);
                     match self.read_token().get_kind() {
-                        TokenKind::Comma => continue,
+                        TokenKind::Comma => {
+                            self.parser.get_token(); 
+                            continue
+                        },
                         TokenKind::Semicolon => break,
                         e => {
                             return Err(AstError::with_message(
@@ -1149,7 +1156,9 @@ impl AstRoot {
                     }
                     second_simples.push(s);
                     match self.read_token().get_kind() {
-                        TokenKind::Comma => continue,
+                        TokenKind::Comma => {
+                            self.parser.get_token();
+                            continue},
                         TokenKind::Colon => break,
                         e => {
                             return Err(AstError::with_message(
