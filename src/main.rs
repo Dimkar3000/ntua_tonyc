@@ -187,6 +187,8 @@ fn main() {
     ast.parser.get_token();
     let a = ast.func_def();
     println!("\n\n{:#?}", a);
+    // println!("\n\n{:?}", a.unwrap().stmts);
+    
 
     // println!("{:?}", fs::read_dir(".").unwrap().collect::<Vec<_>>());
     // let mut ast = Ast::new(&stream);

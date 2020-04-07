@@ -45,6 +45,8 @@ pub enum TypeDecl {
     List(Rc<TypeDecl>),
 }
 
+
+
 #[derive(Debug, Clone)]
 pub struct VarDef {
     name: String,
@@ -185,9 +187,9 @@ impl AstRoot {
         result.symbol_table.insert("putc", TypeDecl::Void).unwrap();
         result.symbol_table.insert("puts", TypeDecl::Void).unwrap();
 
-        result.symbol_table.insert("geti", TypeDecl::Void).unwrap();
-        result.symbol_table.insert("getb", TypeDecl::Void).unwrap();
-        result.symbol_table.insert("getc", TypeDecl::Void).unwrap();
+        result.symbol_table.insert("geti", TypeDecl::Int).unwrap();
+        result.symbol_table.insert("getb", TypeDecl::Bool).unwrap();
+        result.symbol_table.insert("getc", TypeDecl::Char).unwrap();
         result.symbol_table.insert("gets", TypeDecl::Void).unwrap();
 
         result
@@ -942,12 +944,16 @@ impl AstRoot {
                         | TokenKind::KBool
                         | TokenKind::KList
                         | TokenKind::KChar => vars.extend(self.var_def()?),
+                        
                         _ => break,
                     }
                 }
+                // println!("{:?}",self.read_token());
+                // self.parser.get_token();
                 while self.read_token().get_kind() != TokenKind::KEnd {
                     stmts.push(self.stmt()?);
                 }
+                self.parser.get_token();
                 // self.parser.get_token();
                 // self.current_block_name = old_name;
                 self.symbol_table.close_scope();
@@ -994,6 +1000,9 @@ impl AstRoot {
                     TokenKind::Assignement => {
                         self.parser.get_token();
                         let expr = self.expr()?;
+                        if atom.get_type() != expr.get_type() {
+                            return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: Assigment requires that the variable is the same type as the expression, but {:?}:={:?}",atom.get_type(),expr.get_type())));
+                        }
                         match t.extra {
                             TokenExtra::Name(s) =>
                             Ok(Stmt::Assign(s,expr)),
@@ -1175,6 +1184,7 @@ impl AstRoot {
                         elseblock.push(self.stmt()?);
                     }
                 }
+                // println!("a {:?}",self.read_token());
                 self.parser.get_token();
                 Ok(Stmt::If {
                     condition: cond,

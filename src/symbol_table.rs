@@ -79,6 +79,7 @@ impl<T: Debug + Clone> SymbolTable<T> {
 
     pub fn open_scope<S: AsRef<str>>(&mut self, name: S) {
         // The name of the scope will be the function name
+        // Could be useful for debugging
         self.scopes.push(Scope::new(name))
     }
     pub fn close_scope(&mut self) {
