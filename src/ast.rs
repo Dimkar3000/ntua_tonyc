@@ -45,8 +45,6 @@ pub enum TypeDecl {
     List(Rc<TypeDecl>),
 }
 
-
-
 #[derive(Debug, Clone)]
 pub struct VarDef {
     name: String,
@@ -383,9 +381,11 @@ impl AstRoot {
                 ..
             } => match self.parser.get_token().kind {
                 TokenKind::LParenthesis => {
+                
                     let mut args = Vec::new();
                     loop {
                         self.parser.get_token();
+                
                         if self.read_token().get_kind() == TokenKind::RParenthesis {
                             break;
                         }
@@ -393,6 +393,7 @@ impl AstRoot {
                             Ok(k) => k,
                             Err(e) => return Err(e.extend("Ast: Function Arguments failed")),
                         };
+                
                         args.push(tmp);
                         match self.read_token().get_kind() {
                             TokenKind::Comma => (),
@@ -504,11 +505,12 @@ impl AstRoot {
     }
 
     pub fn expr(&mut self) -> Result<Expr, AstError> {
+        
         let left = match self.read_token().get_kind() {
             TokenKind::Name | TokenKind::CString => {
                 let a = self.atom()?;
-                Expr::Atomic(a.get_type(),a)
-            },
+                Expr::Atomic(a.get_type(), a)
+            }
             TokenKind::KTrue => {
                 self.parser.get_token();
                 Expr::CBool(true)
@@ -522,6 +524,7 @@ impl AstRoot {
                 Expr::CNil
             }
             TokenKind::CChar => {
+                
                 if let TokenExtra::Cchar(n) = self.read_token().extra {
                     self.parser.get_token();
                     Expr::CChar(n)
@@ -544,7 +547,7 @@ impl AstRoot {
                         "Parser: Token wan Int but extra wan't Number",
                     ));
                 }
-            },
+            }
             TokenKind::KNot => {
                 use std::ops::Deref;
                 self.parser.get_token();
@@ -558,8 +561,8 @@ impl AstRoot {
 
                     e => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: \"not\" should be followed by a boolean expression, but instead got: {:?}",e))),                    
                 }
-            },
-            // Paranthesis reduces to the Expression inside it 
+            }
+            // Paranthesis reduces to the Expression inside it
             TokenKind::LParenthesis => {
                 self.parser.get_token();
                 let c = self.expr()?;
@@ -568,9 +571,14 @@ impl AstRoot {
                         self.parser.get_token();
                         c
                     }
-                    e => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: Expected RParenthesis but got: {:?}",e))), 
+                    e => {
+                        return Err(AstError::with_message(
+                            self.parser.column,
+                            self.parser.line,
+                            &format!("Ast: Expected RParenthesis but got: {:?}", e),
+                        ))
+                    }
                 }
-
             }
             TokenKind::Addition => {
                 self.parser.get_token();
@@ -580,24 +588,42 @@ impl AstRoot {
                     Expr::Binary(..) => Expr::Unary(TokenKind::Addition,Rc::new(c)),
                     e => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: \"+\" should be followed by a numeric expression, but instead: {:?}",e))),
                 }
-            },
+            }
             TokenKind::Subtraction => {
                 self.parser.get_token();
                 let c = self.expr()?;
                 match c {
                     Expr::CInt(e) => Expr::CInt(-e),
-                    Expr::Binary(..) => Expr::Unary(TokenKind::Subtraction,Rc::new(c)),
-                    e => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: \"+\" should be followed by a numeric expression, but: {:?}",e))),
+                    Expr::Binary(..) => Expr::Unary(TokenKind::Subtraction, Rc::new(c)),
+                    e => {
+                        return Err(AstError::with_message(
+                            self.parser.column,
+                            self.parser.line,
+                            &format!(
+                                "Ast: \"+\" should be followed by a numeric expression, but: {:?}",
+                                e
+                            ),
+                        ))
+                    }
                 }
-            },
+            }
             TokenKind::KNew => {
                 self.parser.get_token();
                 let t = self.partial_var_type()?;
                 // self.parser.get_token();
                 let exp = self.expr()?;
-                match  exp.get_type() {
+                match exp.get_type() {
                     TypeDecl::Int => (),
-                    e => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: new syntaxt required integer inside the arguments, but: {:?}",e))),
+                    e => {
+                        return Err(AstError::with_message(
+                            self.parser.column,
+                            self.parser.line,
+                            &format!(
+                                "Ast: new syntaxt required integer inside the arguments, but: {:?}",
+                                e
+                            ),
+                        ))
+                    }
                 };
                 match self.read_token().get_kind() {
                     TokenKind::RBracket => {
@@ -618,11 +644,19 @@ impl AstRoot {
                     self.parser.get_token();
                     let exp = self.expr()?;
                     let ctype = match exp.clone() {
-                        Expr::Atomic(TypeDecl::List(t),_) => t.as_ref().clone(),
-                        Expr::Hash(t,..) => t,
-                        Expr::Tail(TypeDecl::List(t),..) => t.as_ref().clone(),
-                        e => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: Head function expects List of something, but: {:?}",e))),
-
+                        Expr::Atomic(TypeDecl::List(t), _) => t.as_ref().clone(),
+                        Expr::Hash(t, ..) => t,
+                        Expr::Tail(TypeDecl::List(t), ..) => t.as_ref().clone(),
+                        e => {
+                            return Err(AstError::with_message(
+                                self.parser.column,
+                                self.parser.line,
+                                &format!(
+                                    "Ast: Head function expects List of something, but: {:?}",
+                                    e
+                                ),
+                            ))
+                        }
                     };
                     match self.read_token().get_kind() {
                         TokenKind::RParenthesis => {
@@ -654,16 +688,24 @@ impl AstRoot {
                     self.parser.get_token();
                     let exp = self.expr()?;
                     let ctype = match exp.clone() {
-                        Expr::Atomic(TypeDecl::List(t),_) => TypeDecl::List(t),
-                        Expr::Hash(t,..) => t,
-                        Expr::Tail(t,..) => t,
-                        e => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: Tail function expects List of something, but: {:?}",e))),
-
+                        Expr::Atomic(TypeDecl::List(t), _) => TypeDecl::List(t),
+                        Expr::Hash(t, ..) => t,
+                        Expr::Tail(t, ..) => t,
+                        e => {
+                            return Err(AstError::with_message(
+                                self.parser.column,
+                                self.parser.line,
+                                &format!(
+                                    "Ast: Tail function expects List of something, but: {:?}",
+                                    e
+                                ),
+                            ))
+                        }
                     };
                     match self.read_token().get_kind() {
                         TokenKind::RParenthesis => {
                             self.parser.get_token();
-                            Expr::Tail(ctype,Rc::new(exp))
+                            Expr::Tail(ctype, Rc::new(exp))
                         }
                         e => {
                             return Err(AstError::with_message(
@@ -690,11 +732,20 @@ impl AstRoot {
                     self.parser.get_token();
                     let exp = self.expr()?;
                     match exp {
-                        Expr::Atomic(TypeDecl::List(_),_) => (),
+                        Expr::Atomic(TypeDecl::List(_), _) => (),
                         Expr::CNil => (),
                         Expr::Hash(..) => (),
                         Expr::Tail(..) => (),
-                        e => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: Tail function expects List of something, but: {:?}",e))),
+                        e => {
+                            return Err(AstError::with_message(
+                                self.parser.column,
+                                self.parser.line,
+                                &format!(
+                                    "Ast: Tail function expects List of something, but: {:?}",
+                                    e
+                                ),
+                            ))
+                        }
                     };
 
                     match self.read_token().get_kind() {
@@ -730,12 +781,7 @@ impl AstRoot {
                     &format!("Ast: unexpected token given to expr: {:?}", e),
                 ))
             }
-            // match self.atom() {
-            //     Ok(k) => Ok(Expr::Atomic(k)),
-            //     Err()
-            // },
         };
-
         // Binary Operations
         match self.read_token().get_kind() {
             TokenKind::Addition
@@ -839,7 +885,6 @@ impl AstRoot {
                         "Ast: Expected LParenthesis next to function name",
                     ));
                 }
-
                 let args = self.formal_def()?;
                 let a = match t.clone() {
                     Some(i) => self.symbol_table.insert(&name, i),
@@ -851,7 +896,7 @@ impl AstRoot {
                         return Err(AstError::with_message(
                             self.parser.column,
                             self.parser.line,
-                            &e,
+                            &format!("Ast Def: {}", e),
                         ))
                     }
                 }
@@ -905,6 +950,9 @@ impl AstRoot {
 
                 // let old_name = self.current_block_name.to_owned();
                 // self.current_block_name = format!("{}::{}", self.current_block_name, name);
+                let _ = self
+                    .symbol_table
+                    .insert(&name, t.clone().unwrap_or(TypeDecl::Void));
                 self.symbol_table.open_scope(&name);
                 if self.read_token().get_kind() != TokenKind::LParenthesis {
                     return Err(AstError::with_message(
@@ -915,6 +963,18 @@ impl AstRoot {
                 }
 
                 let args = self.formal_def()?;
+                match self.read_token().get_kind() {
+                    TokenKind::Colon => (),
+                    e => {
+                        return Err(AstError::with_message(
+                            self.parser.column,
+                            self.parser.line,
+                            &format!("Ast: Function Definition end with colon, but got: {:?}", e),
+                        ))
+                    }
+                };
+                self.parser.get_token();
+
                 let a = match t.clone() {
                     Some(i) => self.symbol_table.insert(&name, i),
                     None => self.symbol_table.insert(&name, TypeDecl::Void),
@@ -926,7 +986,7 @@ impl AstRoot {
                         return Err(AstError::with_message(
                             self.parser.column,
                             self.parser.line,
-                            &e,
+                            &format!("Ast Def: {}", e),
                         ))
                     }
                 }
@@ -937,6 +997,7 @@ impl AstRoot {
                 let mut stmts = Vec::new();
 
                 loop {
+
                     match self.read_token().get_kind() {
                         TokenKind::KDef => defs.push(self.func_def()?),
                         TokenKind::KDecl => decls.push(self.func_decl()?),
@@ -944,11 +1005,10 @@ impl AstRoot {
                         | TokenKind::KBool
                         | TokenKind::KList
                         | TokenKind::KChar => vars.extend(self.var_def()?),
-                        
+
                         _ => break,
                     }
                 }
-                // println!("{:?}",self.read_token());
                 // self.parser.get_token();
                 while self.read_token().get_kind() != TokenKind::KEnd {
                     stmts.push(self.stmt()?);
@@ -957,21 +1017,22 @@ impl AstRoot {
                 // self.parser.get_token();
                 // self.current_block_name = old_name;
                 self.symbol_table.close_scope();
-                let a = match t.clone() {
-                    Some(i) => self.symbol_table.insert(&name, i),
-                    None => self.symbol_table.insert(&name, TypeDecl::Void),
-                };
+                // let a = match t.clone() {
+                //     Some(i) => self.symbol_table.insert(&name, i),
+                //     None => self.symbol_table.insert(&name, TypeDecl::Void),
+                // };
 
-                match a {
-                    Ok(()) => (),
-                    Err(e) => {
-                        return Err(AstError::with_message(
-                            self.parser.column,
-                            self.parser.line,
-                            &e,
-                        ))
-                    }
-                }
+                // match a {
+                //     Ok(()) => (),
+                //     Err(e) => {
+                //         return Err(AstError::with_message(
+                //             self.parser.column,
+                //             self.parser.line,
+
+                //             &format!("Ast Def: {}",e),
+                //         ))
+                //     }
+                // }
                 Ok(FuncDef {
                     rtype: t,
                     name,
@@ -1180,11 +1241,11 @@ impl AstRoot {
                         }
                     }
                     self.parser.get_token();
+                
                     while self.read_token().get_kind() != TokenKind::KEnd {
                         elseblock.push(self.stmt()?);
                     }
                 }
-                // println!("a {:?}",self.read_token());
                 self.parser.get_token();
                 Ok(Stmt::If {
                     condition: cond,
@@ -1218,6 +1279,10 @@ impl AstRoot {
                     ),
                 ))
             }
+        };
+        if self.read_token().get_kind() == TokenKind::RParenthesis {
+            self.parser.get_token();
+            return Ok(Vec::new());
         };
         let mut results = Vec::new();
         loop {
@@ -1253,7 +1318,6 @@ impl AstRoot {
                 }
             };
         }
-        self.parser.get_token();
         Ok(results)
     }
 }

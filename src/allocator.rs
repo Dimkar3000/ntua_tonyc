@@ -1,6 +1,7 @@
 use bumpalo::Bump;
 use core::fmt::Debug;
 
+#[derive(Default)]
 pub struct BumpAllocator {
     allocator: Bump,
 }
@@ -14,9 +15,7 @@ impl Debug for BumpAllocator {
 #[allow(dead_code)]
 impl BumpAllocator {
     pub fn new() -> Self {
-        BumpAllocator {
-            allocator: Bump::new(),
-        }
+        BumpAllocator::default()
     }
 }
 

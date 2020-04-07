@@ -19,7 +19,7 @@ impl<T: Debug + Clone> Scope<T> {
         assert_ne!(name.as_ref().to_owned().len(), 0);
         if self.locals.contains_key(name.as_ref()) {
             return Err(format!(
-                "Variable \"{}\" already defined in function: \"{}\" with Type: {:?}",
+                "Name \"{}\" already defined in function: \"{}\" with Type: {:?}",
                 name.as_ref().to_owned(),
                 self.name,
                 data
@@ -51,7 +51,7 @@ impl<T> SymbolEntry<T> {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SymbolTable<T> {
     scopes: Vec<Scope<T>>,
 }

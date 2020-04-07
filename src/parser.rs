@@ -464,6 +464,7 @@ impl Parser {
                     self.token = match self.read_char() {
                         Ok(c) => {
                             let c0 = self.read_char();
+                            self.index -=1; // Note(dimkar): this reset the index back because there is a global +1 at the end of next token and it will skip the next token
                             match c0 {
                                 Ok('\'') => Token::cchar(self.column, self.line, c),
                                 Ok(e) => Token::error(
@@ -491,7 +492,7 @@ impl Parser {
                         result.push(c.unwrap());
                         c = self.read_char();
                     }
-                    self.index -= 1;
+                    self.index -=1; // Note(dimkar): this reset the index back because there is a global +1 at the end of next token and it will skip the next token
                     // println!("{:?}",self.stream.chars().nth(self.index));
                     self.token = match c {
                         Err(e) => Token::error(
