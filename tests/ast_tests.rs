@@ -33,7 +33,7 @@ fn test_ok() {
             let mut a = AstRoot::new(stream);
             a.parser.next_token();
             let tree = a.func_def();
-            println!("{:?}",tree);
+            println!("{:?}", tree);
 
             assert!(tree.is_ok());
             println!("Passed");

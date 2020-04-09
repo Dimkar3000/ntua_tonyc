@@ -68,7 +68,7 @@ pub enum TokenExtra {
     Name(String),
     Comment(usize, usize),
     Cchar(char),
-    Number(i16),
+    Int(i16),
 }
 
 #[derive(Debug, Clone)]
@@ -82,11 +82,11 @@ pub struct Token {
 #[derive(Debug)]
 pub struct Parser {
     token: Token,
+    pub previous: Token,
     pub stream: String,
     pub index: usize,
     pub column: usize,
     pub line: usize,
-    steps: Vec<usize>,
 }
 
 impl Token {
@@ -102,13 +102,14 @@ impl Token {
             extra: TokenExtra::None,
         }
     }
+
     fn int(col: usize, line: usize, stream: &str) -> Self {
         match stream.parse::<i16>() {
             Ok(e) => Token {
                 kind: TokenKind::INT,
                 col,
                 line,
-                extra: TokenExtra::Number(e),
+                extra: TokenExtra::Int(e),
             },
             Err(_) => Token {
                 kind: TokenKind::Error,
@@ -313,11 +314,16 @@ impl Parser {
                 line: 0,
                 extra: TokenExtra::None,
             },
+            previous: Token {
+                kind: TokenKind::NotStarted,
+                col: 0,
+                line: 0,
+                extra: TokenExtra::None,
+            },
             stream: stream.into(),
             index: 0,
             column: 0,
             line: 1,
-            steps: Vec::new(),
         }
     }
     pub fn read_token(&self) -> Token {
@@ -388,6 +394,7 @@ impl Parser {
         }
     }
     pub fn get_token(&mut self) -> Token {
+        self.previous = self.token.clone();
         self.next_token();
         loop {
             let c = &self.token.kind;
@@ -403,14 +410,7 @@ impl Parser {
         self.token.clone()
     }
 
-    // pub fn back(&mut self) {
-    //     self.index = self.steps.pop().unwrap_or(0);
-    //     self.index = self.steps.pop().unwrap_or(0);
-    //     self.next_token();
-    // }
-
     pub fn next_token(&mut self) {
-        self.steps.push(self.index);
         if self.index == self.stream.len() {
             self.token = Token {
                 kind: TokenKind::Empty,
@@ -465,7 +465,7 @@ impl Parser {
                     self.token = match self.read_char() {
                         Ok(c) => {
                             let c0 = self.read_char();
-                            self.index -=1; // Note(dimkar): this reset the index back because there is a global +1 at the end of next token and it will skip the next token
+                            self.index -= 1; // Note(dimkar): this reset the index back because there is a global +1 at the end of next token and it will skip the next token
                             match c0 {
                                 Ok('\'') => Token::cchar(self.column, self.line, c),
                                 Ok(e) => Token::error(
@@ -493,8 +493,8 @@ impl Parser {
                         result.push(c.unwrap());
                         c = self.read_char();
                     }
-                    self.index -=1; // Note(dimkar): this reset the index back because there is a global +1 at the end of next token and it will skip the next token
-                    // println!("{:?}",self.stream.chars().nth(self.index));
+                    self.index -= 1; // Note(dimkar): this reset the index back because there is a global +1 at the end of next token and it will skip the next token
+                                     // println!("{:?}",self.stream.chars().nth(self.index));
                     self.token = match c {
                         Err(e) => Token::error(
                             self.column,
