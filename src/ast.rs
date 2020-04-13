@@ -451,7 +451,7 @@ impl AstRoot {
                             e => {
                                 if self.parser.previous.get_kind() == TokenKind::RParenthesis {
                                     // self.parser.get_token();
-                                    break; 
+                                    break;
                                 }
                                 return Err(AstError::with_message(
                                     self.parser.column,
@@ -461,7 +461,7 @@ impl AstRoot {
                                         e,
                                         self.read_token()
                                     ),
-                                ))
+                                ));
                             }
                         }
                     }
@@ -647,14 +647,14 @@ impl AstRoot {
                 }
             }
 
-            (a, Expr::Binary(t, None, None)) if a.get_type() == TypeDecl::Int => {
-                Ok(Expr::Binary(t, Some(a.bx()), None))
-            }
             (Expr::Binary(t0, Some(a), b), Expr::Binary(t, c, d)) if low(t0) && high(t) => {
                 match self.match_expr(b, Expr::Binary(t, c, d)) {
                     Ok(k) => Ok(Expr::Binary(t0, Some(a), Some(k.bx()))),
                     Err(_) => Err(*left),
                 }
+            }
+            (a, Expr::Binary(t, None, None)) if a.get_type() == TypeDecl::Int => {
+                Ok(Expr::Binary(t, Some(a.bx()), None))
             }
 
             (Expr::Binary(t, Some(a), b), Expr::CInt(n)) => match self.match_expr(b, Expr::CInt(n))
@@ -720,7 +720,6 @@ impl AstRoot {
         }
     }
     pub fn expr(&mut self, is_paranthesis: bool) -> Result<Expr, AstError> {
-        
         let mut result: Option<Box<Expr>> = None;
         // let current_error;
         loop {
@@ -810,7 +809,7 @@ impl AstRoot {
                             .error(format!("Invalid Expression inside parenthesis: {:?}", r));
                     }
                     self.parser.get_token();
-                    return Ok(*r)
+                    return Ok(*r);
                 }
                 TokenKind::Empty => {
                     if result.is_some() {
@@ -1230,7 +1229,7 @@ impl AstRoot {
                 self.parser.get_token();
                 let cond = self.expr(false)?;
                 if cond.get_type() != TypeDecl::Bool {
-                        return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: condition of For statement should reduce to bool but instead got: {:?}",cond)));
+                    return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: condition of For statement should reduce to bool but instead got: {:?}",cond)));
                 }
                 match self.read_token().get_kind() {
                     TokenKind::Semicolon => self.parser.get_token(),
@@ -1277,7 +1276,7 @@ impl AstRoot {
                     body.push(self.stmt()?);
                 }
                 self.parser.get_token();
-                
+
                 Ok(Stmt::For(first_simples, cond, second_simples, body))
             }
             TokenKind::KIf => {
