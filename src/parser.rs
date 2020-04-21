@@ -83,6 +83,7 @@ pub struct Token {
 pub struct Parser {
     token: Token,
     pub previous: Token,
+    pub previous_index: usize,
     pub stream: String,
     pub index: usize,
     pub column: usize,
@@ -322,6 +323,7 @@ impl Parser {
             },
             stream: stream.into(),
             index: 0,
+            previous_index: 0,
             column: 0,
             line: 1,
         }
@@ -395,6 +397,7 @@ impl Parser {
     }
     pub fn get_token(&mut self) -> Token {
         self.previous = self.token.clone();
+        self.previous_index = self.index;
         self.next_token();
         loop {
             let c = &self.token.kind;
@@ -408,6 +411,11 @@ impl Parser {
         }
 
         self.token.clone()
+    }
+
+    pub fn back(&mut self) {
+        self.index = self.previous_index;
+        self.token = self.previous.clone();
     }
 
     pub fn next_token(&mut self) {

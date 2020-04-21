@@ -1,6 +1,7 @@
 use crate::parser::Token;
 use crate::parser::{Parser, TokenExtra, TokenKind};
 use crate::symbol_table::SymbolTable;
+use std::fmt::Display;
 
 #[derive(Debug)]
 pub struct AstError {
@@ -8,6 +9,17 @@ pub struct AstError {
     message: String,
     col: usize,
     line: usize,
+}
+
+impl Display for AstError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        f.debug_struct("AstError")
+            .field("message", &self.message)
+            .field("line", &self.line)
+            .field("column", &self.col)
+            .field("sub_error", &self.sub_error);
+        Ok(())
+    }
 }
 
 impl<'a> AstError {
@@ -32,7 +44,7 @@ impl<'a> AstError {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum TypeDecl {
     Void,
     Nil,
@@ -43,23 +55,40 @@ pub enum TypeDecl {
     List(Box<TypeDecl>),
 }
 
+impl PartialEq for TypeDecl {
+    fn eq(&self, r: &TypeDecl) -> bool {
+        match (self, r) {
+            (TypeDecl::Bool, TypeDecl::Bool) 
+            | (TypeDecl::Char, TypeDecl::Char) 
+            | (TypeDecl::Int, TypeDecl::Int)
+            => true,
+            (TypeDecl::Array(t1),TypeDecl::Array(t2)) => t1 == t2,
+            (TypeDecl::List(t1), TypeDecl::List(t2)) => t1 == t2,
+            (TypeDecl::List(_), TypeDecl::Nil) => true,
+            (TypeDecl::Nil, TypeDecl::Nil) => true,
+            
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct VarDef {
-    name: String,
-    var_type: TypeDecl,
+    pub name: String,
+    pub var_type: TypeDecl,
 }
 
 #[derive(Debug, Clone)]
 pub struct FormalDecl {
-    is_ref: bool,
-    def: VarDef,
+    pub is_ref: bool,
+    pub def: VarDef,
 }
 
 #[derive(Debug, Clone)]
 pub struct FuncDecl {
-    rtype: Option<TypeDecl>,
-    name: String,
-    arguments: Vec<FormalDecl>,
+    pub rtype: Option<TypeDecl>,
+    pub name: String,
+    pub arguments: Vec<FormalDecl>,
     // body: Vec<Stmt>,
 }
 
@@ -92,12 +121,26 @@ pub enum Atomic {
 }
 
 impl Atomic {
+    pub fn get_name(&self) -> String {
+        match self {
+            Atomic::Name(_, s) => s.clone(),
+            Atomic::CString(s) => s.clone(),
+            Atomic::Accessor(a, _) => a.get_name(),
+            Atomic::FuncCall(_, s, _) => s.clone(),
+        }
+    }
     pub fn get_type(&self) -> TypeDecl {
         match self {
             Atomic::Name(t, _) => t.clone(),
             Atomic::CString(_) => TypeDecl::Array(Box::new(TypeDecl::Char)),
             Atomic::FuncCall(t, ..) => t.clone(),
-            Atomic::Accessor(base, _) => base.get_type(),
+            Atomic::Accessor(base, _) => {
+                if let TypeDecl::Array(t) = base.get_type() {
+                    *t
+                } else {
+                    unreachable!()
+                }
+            }
         }
     }
 }
@@ -205,7 +248,7 @@ pub enum Stmt {
     },
     For(Vec<Stmt>, Expr, Vec<Stmt>, Vec<Stmt>), // Note: First 2 vecs should contain only simple vec
     Skip,
-    Assign(String, Expr),
+    Assign(Atomic, Expr),
     Call(String, Vec<Expr>),
 }
 
@@ -229,6 +272,19 @@ impl AstRoot {
             // current_block_name: Scope{name:"root".to_owned()},
             symbol_table: SymbolTable::new(),
         };
+        result.symbol_table.insert("abs", TypeDecl::Int).unwrap();
+        result.symbol_table.insert("ord", TypeDecl::Int).unwrap();
+        result.symbol_table.insert("chr", TypeDecl::Char).unwrap();
+        result.symbol_table.insert("strlen", TypeDecl::Int).unwrap();
+        result.symbol_table.insert("strcmp", TypeDecl::Int).unwrap();
+        result
+            .symbol_table
+            .insert("strcpy", TypeDecl::Void)
+            .unwrap();
+        result
+            .symbol_table
+            .insert("strcat", TypeDecl::Void)
+            .unwrap();
 
         result.symbol_table.insert("puti", TypeDecl::Void).unwrap();
         result.symbol_table.insert("putb", TypeDecl::Void).unwrap();
@@ -646,6 +702,9 @@ impl AstRoot {
                     Err(_) => Err(*left),
                 }
             }
+            (Expr::Binary(t0, Some(a), None), b) if b.get_type() == TypeDecl::Int => {
+                Ok(Expr::Binary(t0, Some(a), Some(b.bx())))
+            }
 
             (Expr::Binary(t0, Some(a), b), Expr::Binary(t, c, d)) if low(t0) && high(t) => {
                 match self.match_expr(b, Expr::Binary(t, c, d)) {
@@ -742,9 +801,26 @@ impl AstRoot {
                         Expr::Binary(token, None, None)
                     }
                 }
-                TokenKind::Name | TokenKind::CString => {
-                    let atom = self.atom()?;
+                TokenKind::Name => {
+                    if let TokenExtra::Name(n) = self.read_token().extra {
+                        let t = self.symbol_table.lookup(n);
+                        if t.is_some() && t.unwrap().data == TypeDecl::Void {
+                            // function that returns void
+                            break;
+                        } else {
+                            if result.is_some() && result.as_ref().unwrap().is_valid() {
+                                break;
+                            }
+                            let atom = self.atom()?;
 
+                            Expr::Atomic(atom.get_type(), atom)
+                        }
+                    } else {
+                        unreachable!()
+                    }
+                }
+                TokenKind::CString => {
+                    let atom = self.atom()?;
                     Expr::Atomic(atom.get_type(), atom)
                 }
                 TokenKind::CChar => {
@@ -798,6 +874,17 @@ impl AstRoot {
                             break;
                         }
                     }
+                }
+                TokenKind::RBracket => {
+                    if result.is_none() {
+                        return self.error("Rbracket without anything");
+                    }
+                    let r = result.unwrap();
+                    if !r.is_valid() {
+                        return self
+                            .error(format!("Invalid Expression followed by RBracket: {:?}", r));
+                    }
+                    return Ok(*r);
                 }
                 TokenKind::RParenthesis => {
                     if result.is_none() {
@@ -935,6 +1022,7 @@ impl AstRoot {
                 }
                 Err(p) => {
                     result = Some(p.bx());
+                    self.parser.back();
                     break;
                 }
             }
@@ -1158,22 +1246,18 @@ impl AstRoot {
 
     pub fn stmt(&mut self) -> Result<Stmt, AstError> {
         let t = self.read_token();
-        // self.parser.get_token();
         match t.get_kind() {
             TokenKind::Name => {
                 let atom = self.atom()?;
                 match self.read_token().get_kind() {
                     TokenKind::Assignement => {
                         self.parser.get_token();
+                        
                         let expr = self.expr(false)?;
-                        if atom.get_type() != expr.get_type() {
+                        if atom.get_type() != expr.get_type()  {
                             return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: Assigment requires that the variable is the same type as the expression, but {:?}:={:?}",atom.get_type(),expr.get_type())));
                         }
-                        match t.extra {
-                            TokenExtra::Name(s) =>
-                            Ok(Stmt::Assign(s,expr)),
-                            e => unreachable!("should never reach: {:?}",e),
-                        }
+                        Ok(Stmt::Assign(atom,expr))
                     },
                     _ => {
                         match atom {
@@ -1283,6 +1367,7 @@ impl AstRoot {
                 self.parser.get_token();
                 let cond = self.expr(false)?;
                 match cond {
+                    Expr::CBool(..) | Expr::Atomic(TypeDecl::Bool,_)|
                     Expr::Comparison(..) | Expr::Negation(..) | Expr::NilCheck(..) => (),
                     e => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: condition of If statement should reduce to bool but instead got: {:?}",e))),
                 }
@@ -1369,9 +1454,10 @@ impl AstRoot {
                 self.parser.column,
                 self.parser.line,
                 &format!(
-                    "Ast failed to parse statement: {:?} with extra; {:?}",
+                    "Ast failed to parse statement: {:?} with extra; {:?}, pre:{:?}",
                     e,
-                    self.read_token()
+                    self.read_token(),
+                    self.parser.previous
                 ),
             )),
         }

@@ -3,3 +3,5 @@
 **.exe
 .idea
 lld*.exe
+.vs
+test.ll
