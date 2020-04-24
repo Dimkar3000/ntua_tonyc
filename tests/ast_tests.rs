@@ -21,8 +21,8 @@ fn test_dir(dir: &Path, cb: &dyn Fn(&DirEntry)) -> std::io::Result<()> {
 #[test]
 fn test_ok() {
     let stream = std::fs::read_to_string("./files/examples/ok/hanoi.t").unwrap();
-    let mut ast = AstRoot::new(stream);
-    ast.parser.get_token();
+    let mut ast = AstRoot::new(&stream);
+    ast.parser.advance_token();
     test_dir(Path::new("./files/examples/ok/"), &|x| {
         let path = x.path();
         if path.is_file() && path.extension() == Some(OsStr::new("t")) {
@@ -30,8 +30,7 @@ fn test_ok() {
             let mut file = File::open(path).unwrap();
             let mut stream = String::new();
             file.read_to_string(&mut stream).unwrap();
-            let mut a = AstRoot::new(stream);
-            a.parser.next_token();
+            let mut a = AstRoot::new(&stream);
             let tree = a.func_def();
             println!("{:?}", tree);
 
@@ -51,8 +50,7 @@ fn test_error() {
             let mut file = File::open(path).unwrap();
             let mut stream = String::new();
             file.read_to_string(&mut stream).unwrap();
-            let mut a = AstRoot::new(stream);
-            a.parser.next_token();
+            let mut a = AstRoot::new(&stream);
             let tree = a.func_def();
             // println!("{:?}",tree);
             // std::io::stdout().flush();

@@ -1,48 +1,8 @@
 use crate::parser::Token;
 use crate::parser::{Parser, TokenExtra, TokenKind};
 use crate::symbol_table::SymbolTable;
-use std::fmt::Display;
+use crate::error::Error;
 
-#[derive(Debug)]
-pub struct AstError {
-    sub_error: Option<Box<AstError>>,
-    message: String,
-    col: usize,
-    line: usize,
-}
-
-impl Display for AstError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
-        f.debug_struct("AstError")
-            .field("message", &self.message)
-            .field("line", &self.line)
-            .field("column", &self.col)
-            .field("sub_error", &self.sub_error);
-        Ok(())
-    }
-}
-
-impl<'a> AstError {
-    pub fn with_message(col: usize, line: usize, m: &'a str) -> Self {
-        AstError {
-            sub_error: None,
-            message: m.to_owned(),
-            col,
-            line,
-        }
-    }
-
-    pub fn extend(self, m: &'a str) -> Self {
-        let line = self.line;
-        let col = self.col;
-        AstError {
-            sub_error: Some(Box::new(self)),
-            message: m.to_owned(),
-            line,
-            col,
-        }
-    }
-}
 
 #[derive(Debug, Clone)]
 pub enum TypeDecl {
@@ -252,9 +212,9 @@ pub enum Stmt {
     Call(String, Vec<Expr>),
 }
 
-pub struct AstRoot {
+pub struct AstRoot<'a> {
     // allocator: BumpAllocator,
-    pub parser: Parser,
+    pub parser: Parser<'a>,
     pub symbol_table: SymbolTable<TypeDecl>,
 }
 
@@ -264,11 +224,11 @@ impl Expr {
     }
 }
 
-impl AstRoot {
-    pub fn new<T: Into<String>>(stream: T) -> Self {
+impl<'a> AstRoot<'a> {
+    pub fn new(stream: &'a str) -> Self {
         let mut result = AstRoot {
             // allocator: BumpAllocator::new(),
-            parser: Parser::new(stream.into()),
+            parser: Parser::new(stream),
             // current_block_name: Scope{name:"root".to_owned()},
             symbol_table: SymbolTable::new(),
         };
@@ -305,14 +265,14 @@ impl AstRoot {
 
     // Todo(dimkar): check when can we blow the stack
     // Move the parser to the next token
-    pub fn var_type(&mut self) -> Result<TypeDecl, AstError> {
+    pub fn var_type(&mut self) -> Result<TypeDecl, Error> {
         let mut t = match self.read_token().get_kind() {
             TokenKind::KInt => TypeDecl::Int,
             TokenKind::KChar => TypeDecl::Char,
             TokenKind::KBool => TypeDecl::Bool,
-            TokenKind::KList => match self.parser.get_token().get_kind() {
+            TokenKind::KList => match self.parser.advance_token().get_kind() {
                 TokenKind::LBracket => {
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     let sub = self.var_type();
                     match sub {
                         Ok(e) => TypeDecl::List(Box::new(e)),
@@ -320,45 +280,45 @@ impl AstRoot {
                     }
                 }
                 _ => {
-                    return Err(AstError::with_message(
+                    return Err(Error::with_message(
                         self.parser.column,
                         self.parser.line,
-                        "Ast: Expected Left bracket after keyword \"List\"",
-                    ))
+                        "Expected Left bracket after keyword \"List\"",
+                    "Ast"))
                 }
             },
             TokenKind::Error => match self.read_token().extra {
                 TokenExtra::Error(e) => {
-                    return Err(AstError::with_message(
+                    return Err(Error::with_message(
                         self.parser.column,
                         self.parser.line,
                         &format!("Parser: {}", e),
-                    ))
+                    "Ast"))
                 }
 
                 _ => unreachable!("Token kind and extra should be consistent"),
             },
             e => {
-                return Err(AstError::with_message(
+                return Err(Error::with_message(
                     self.parser.column,
                     self.parser.line,
                     &format!("Wrong type passed: \"{:?}\"", e),
-                ))
+                "Ast"))
             }
         };
         //Handle array syntax
         loop {
-            let token = self.parser.get_token();
+            let token = self.parser.advance_token();
             match token.get_kind() {
                 TokenKind::LBracket => {
-                    if self.parser.get_token().get_kind() == TokenKind::RBracket {
+                    if self.parser.advance_token().get_kind() == TokenKind::RBracket {
                         t = TypeDecl::Array(Box::new(t));
                     } else {
-                        return Err(AstError::with_message(
+                        return Err(Error::with_message(
                             self.parser.column,
                             self.parser.line,
-                            "Ast: Array definition missing Right Bracket",
-                        ));
+                            "Array definition missing Right Bracket",
+                        "Ast"));
                     }
                 }
                 _ => break,
@@ -369,14 +329,14 @@ impl AstRoot {
     }
 
     // This version won't throw an error on missing right bracket. Used for 'new int[5]' type of statements
-    pub fn partial_var_type(&mut self) -> Result<TypeDecl, AstError> {
+    pub fn partial_var_type(&mut self) -> Result<TypeDecl, Error> {
         let mut t = match self.read_token().get_kind() {
             TokenKind::KInt => TypeDecl::Int,
             TokenKind::KChar => TypeDecl::Char,
             TokenKind::KBool => TypeDecl::Bool,
-            TokenKind::KList => match self.parser.get_token().get_kind() {
+            TokenKind::KList => match self.parser.advance_token().get_kind() {
                 TokenKind::LBracket => {
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     let sub = self.var_type();
                     match sub {
                         Ok(e) => TypeDecl::List(Box::new(e)),
@@ -384,38 +344,38 @@ impl AstRoot {
                     }
                 }
                 _ => {
-                    return Err(AstError::with_message(
+                    return Err(Error::with_message(
                         self.parser.column,
                         self.parser.line,
-                        "Ast: Expected Left bracket after keyword \"List\"",
-                    ))
+                        "Expected Left bracket after keyword \"List\"",
+                    "Ast"))
                 }
             },
             TokenKind::Error => match self.read_token().extra {
                 TokenExtra::Error(e) => {
-                    return Err(AstError::with_message(
+                    return Err(Error::with_message(
                         self.parser.column,
                         self.parser.line,
                         &format!("Parser: {}", e),
-                    ))
+                    "Ast"))
                 }
 
                 _ => unreachable!("Token kind and extra should be consistent"),
             },
             e => {
-                return Err(AstError::with_message(
+                return Err(Error::with_message(
                     self.parser.column,
                     self.parser.line,
                     &format!("Wrong type passed: \"{:?}\"", e),
-                ))
+                "Ast"))
             }
         };
         //Handle array syntax
         loop {
-            let token = self.parser.get_token();
+            let token = self.parser.advance_token();
             match token.get_kind() {
                 TokenKind::LBracket => {
-                    if self.parser.get_token().get_kind() == TokenKind::RBracket {
+                    if self.parser.advance_token().get_kind() == TokenKind::RBracket {
                         t = TypeDecl::Array(Box::new(t));
                     } else {
                         return Ok(TypeDecl::Array(Box::new(t)));
@@ -425,11 +385,11 @@ impl AstRoot {
             }
         }
         // self.parser.get_token();
-        Err(AstError::with_message(self.parser.column, self.parser.line, "Ast: partial Type should end on open LBracket because an expression of its size is next. ONLY USED for memory initialization of arrays"))
+        Err(Error::with_message(self.parser.column, self.parser.line, "partial Type should end on open LBracket because an expression of its size is next. ONLY USED for memory initialization of arrays","Ast"))
     }
 
     // Expects the token to be Int, Char, Bool
-    pub fn var_def(&mut self) -> Result<Vec<VarDef>, AstError> {
+    pub fn var_def(&mut self) -> Result<Vec<VarDef>, Error> {
         let mut results = Vec::new();
         let kind = &self.read_token().get_kind();
         if kind == &TokenKind::RParenthesis {
@@ -450,54 +410,57 @@ impl AstRoot {
                             match self.symbol_table.insert(name, t.clone()) {
                                 Ok(_) => (),
                                 Err(e) => {
-                                    return Err(AstError::with_message(
+                                    return Err(Error::with_message(
                                         self.parser.column,
                                         self.parser.line,
                                         &e,
-                                    ))
+                                    "Ast"))
                                 }
                             }
-                            if self.parser.get_token().get_kind() != TokenKind::Comma {
+                            if self.parser.advance_token().get_kind() != TokenKind::Comma {
                                 break;
                             }
-                            self.parser.get_token();
+                            self.parser.advance_token();
                         }
                         _ => unreachable!("both kind and extra should be name"),
                     },
                     e => {
-                        return Err(AstError::with_message(
+                        return Err(Error::with_message(
                             self.parser.column,
                             self.parser.line,
-                            &format!("Ast: Expected name definition, found \"{:?}\"", e),
-                        ))
+                            &format!("Expected name definition, found \"{:?}\"", e),
+                        "Ast"))
                     }
                 }
             },
-            Err(e) => return Err(e.extend("Ast: variable definition failed")),
+            Err(e) => return Err(e.extend("variable definition failed","Ast")),
         };
 
         Ok(results)
     }
 
-    pub fn atom(&mut self) -> Result<Atomic, AstError> {
+    pub fn atom(&mut self) -> Result<Atomic, Error> {
         let base = match self.read_token() {
             Token {
                 kind: TokenKind::Name,
                 extra: TokenExtra::Name(n),
                 ..
-            } => match self.parser.get_token().kind {
+            } => {
+                let name = n.to_string();
+                match self.parser.advance_token().kind {
                 TokenKind::LParenthesis => {
                     let mut args = Vec::new();
                     loop {
-                        self.parser.get_token();
+                        self.parser.advance_token();
 
                         if self.read_token().get_kind() == TokenKind::RParenthesis {
-                            self.parser.get_token();
+                            self.parser.advance_token();
                             break;
                         }
-                        let tmp = match self.expr(true) {
+                        let exp = self.expr(true);
+                        let tmp = match exp {
                             Ok(k) => k,
-                            Err(e) => return Err(e.extend("Ast: Function Arguments failed")),
+                            Err(e) => return Err(e.extend("Function Arguments failed","Ast")),
                         };
 
                         args.push(tmp);
@@ -505,173 +468,172 @@ impl AstRoot {
                             TokenKind::Comma => (),
                             // TokenKind::RParenthesis => break,
                             e => {
-                                if self.parser.previous.get_kind() == TokenKind::RParenthesis {
+                                if self.parser.previous_token().get_kind() == TokenKind::RParenthesis {
                                     // self.parser.get_token();
                                     break;
                                 }
-                                return Err(AstError::with_message(
+                                return Err(Error::with_message(
                                     self.parser.column,
                                     self.parser.line,
                                     &format!(
-                                        "Ast: Expected RParenthesis or comma, but got {:?}, {:?}",
+                                        "Expected RParenthesis or comma, but got {:?}, {:?}",
                                         e,
                                         self.read_token()
                                     ),
-                                ));
+                                "Ast"));
                             }
                         }
                     }
                     // self.parser.get_token();
-                    let d = n.to_string();
-                    match self.symbol_table.lookup(n) {
-                        Some(i) => Atomic::FuncCall(i.data.clone(), d, args),
+                    match self.symbol_table.lookup(&name) {
+                        Some(i) => Atomic::FuncCall(i.clone(), name, args),
                         None => {
-                            return Err(AstError::with_message(
+                            return Err(Error::with_message(
                                 self.parser.column,
                                 self.parser.line,
-                                &format!("Ast: Function name not defined: {}", d),
-                            ))
+                                &format!("Function name not defined: {}", name),
+                            "Ast"))
                         }
                     }
                 }
                 _ => {
                     // self.parser.back();
-                    match self.symbol_table.lookup(&n) {
-                        Some(i) => Atomic::Name(i.data.clone(), n),
+                    match self.symbol_table.lookup(&name) {
+                        Some(i) => Atomic::Name(i.clone(), name),
                         None => {
-                            return Err(AstError::with_message(
+                            return Err(Error::with_message(
                                 self.parser.column,
                                 self.parser.line,
-                                &format!("Ast: Variable name not defined: {}", n),
-                            ))
+                                &format!("Variable name not defined: {}", name),
+                            "Ast"))
                         }
                     }
                 }
-            },
+            }},
             Token {
                 kind: TokenKind::CString,
                 extra: TokenExtra::CString(s),
                 ..
             } => {
-                self.parser.get_token();
+                self.parser.advance_token();
                 Atomic::CString(s)
             }
 
             e => {
-                return Err(AstError::with_message(
+                return Err(Error::with_message(
                     self.parser.column,
                     self.parser.line,
-                    &format!("Ast: atomic failed to consume token: {:?}", e),
-                ))
+                    &format!("atomic failed to consume token: {:?}", e),
+                "Ast"))
             }
         };
         match self.parser.read_token().get_kind() {
             TokenKind::LBracket => {
-                self.parser.get_token();
+                self.parser.advance_token();
                 let b = match self.expr(false) {
                     Ok(k) => k,
-                    Err(e) => return Err(e.extend("Ast:Failed to parse bracket content")),
+                    Err(e) => return Err(e.extend("Ast:Failed to parse bracket content","Ast")),
                 };
                 match b {
                     Expr::CInt(_) | Expr::Unary(..) | Expr::Binary(..) => (),
                     Expr::Atomic(TypeDecl::Int, _) => (),
                     e => {
-                        return Err(AstError::with_message(
+                        return Err(Error::with_message(
                             self.parser.column,
                             self.parser.line,
                             &format!(
-                                "Ast: expression inside bracket should reduce to intiger, but {:?}",
+                                "expression inside bracket should reduce to intiger, but {:?}",
                                 e
                             ),
-                        ))
+                        "Ast"))
                     }
                 }
                 match self.read_token().get_kind() {
                     TokenKind::RBracket => {
-                        self.parser.get_token();
+                        self.parser.advance_token();
                         let r = Atomic::Accessor(Box::new(base), Box::new(b));
                         // match self.symbol_table.insert(name, r.get_type()) {
                         //     Ok(()) => (),
-                        //     Err(e) => return Err(AstError::with_message(self.parser.column, self.parser.line, &e)),
+                        //     Err(e) => return Err(Error::with_message(self.parser.column, self.parser.line, &e)),
                         // }
                         Ok(r)
                     }
-                    e => Err(AstError::with_message(
+                    e => Err(Error::with_message(
                         self.parser.column,
                         self.parser.line,
                         &format!("Ast; right bracket missing: {:?}", e),
-                    )),
+                    "Ast")),
                 }
             }
             _ => {
                 // match self.symbol_table.insert(name, base.get_type()) {
                 //     Ok(()) => (),
-                //     Err(e) => return Err(AstError::with_message(self.parser.column, self.parser.line, &e)),
+                //     Err(e) => return Err(Error::with_message(self.parser.column, self.parser.line, &e)),
                 // }
                 Ok(base)
             }
         }
     }
 
-    pub fn simple_expr(&mut self) -> Result<Expr, AstError> {
+    pub fn simple_expr(&'a mut self) -> Result<Expr, Error> {
         match self.read_token().get_kind() {
             TokenKind::Name | TokenKind::CString => {
                 let a = self.atom()?;
                 Ok(Expr::Atomic(a.get_type(), a))
             }
             TokenKind::KTrue => {
-                self.parser.get_token();
+                self.parser.advance_token();
                 Ok(Expr::CBool(true))
             }
             TokenKind::KFalse => {
-                self.parser.get_token();
+                self.parser.advance_token();
                 Ok(Expr::CBool(false))
             }
             TokenKind::KNil => {
-                self.parser.get_token();
+                self.parser.advance_token();
                 Ok(Expr::CNil)
             }
             TokenKind::CChar => {
                 if let TokenExtra::Cchar(n) = self.read_token().extra {
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     Ok(Expr::CChar(n))
                 } else {
-                    return Err(AstError::with_message(
+                    return Err(Error::with_message(
                         self.parser.column,
                         self.parser.line,
                         "Parser: Token wan CChar but extra wan't",
-                    ));
+                    "Ast"));
                 }
             }
             TokenKind::INT => {
                 if let TokenExtra::Int(n) = self.read_token().extra {
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     Ok(Expr::CInt(n))
                 } else {
-                    return Err(AstError::with_message(
+                    return Err(Error::with_message(
                         self.parser.column,
                         self.parser.line,
                         "Parser: Token wan Int but extra wan't Number",
-                    ));
+                    "Ast"));
                 }
             }
-            e => Err(AstError::with_message(
+            e => Err(Error::with_message(
                 self.parser.column,
                 self.parser.line,
                 &format!(
-                    "Ast: simple_expr() was called with incorrect token: {:?}",
+                    "simple_expr() was called with incorrect token: {:?}",
                     e
                 ),
-            )),
+            "Ast")),
         }
     }
 
-    pub fn error<T, S: AsRef<str>>(&self, message: S) -> Result<T, AstError> {
-        Err(AstError::with_message(
+    pub fn error<T, S: AsRef<str>>(&self, message: S) -> Result<T, Error> {
+        Err(Error::with_message(
             self.parser.column,
             self.parser.line,
             message.as_ref(),
-        ))
+        "Ast"))
     }
 
     pub fn match_expr(&self, left: Option<Box<Expr>>, right: Expr) -> Result<Expr, Expr> {
@@ -781,7 +743,7 @@ impl AstRoot {
             _ => Err(*left),
         }
     }
-    pub fn expr(&mut self, is_paranthesis: bool) -> Result<Expr, AstError> {
+    pub fn expr(&mut self, is_paranthesis: bool) -> Result<Expr, Error> {
         let mut result: Option<Box<Expr>> = None;
         // let current_error;
         loop {
@@ -789,16 +751,16 @@ impl AstRoot {
             let token = self.read_token();
             let right = match token.get_kind() {
                 TokenKind::KTrue => {
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     Expr::CBool(true)
                 }
                 TokenKind::KFalse => {
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     Expr::CBool(false)
                 }
                 TokenKind::Addition | TokenKind::Subtraction => {
                     let token = self.read_token().get_kind();
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     if result.is_none() {
                         Expr::Unary(token, None)
                     } else {
@@ -808,7 +770,7 @@ impl AstRoot {
                 TokenKind::Name => {
                     if let TokenExtra::Name(n) = self.read_token().extra {
                         let t = self.symbol_table.lookup(n);
-                        if t.is_some() && t.unwrap().data == TypeDecl::Void {
+                        if t.is_some() && t.unwrap() == &TypeDecl::Void {
                             // function that returns void
                             break;
                         } else {
@@ -828,27 +790,29 @@ impl AstRoot {
                     Expr::Atomic(atom.get_type(), atom)
                 }
                 TokenKind::CChar => {
-                    self.parser.get_token();
-                    match token.extra {
+                    let c= match token.extra {
                         TokenExtra::Cchar(c) => Expr::CChar(c),
                         _ => unreachable!("char"),
-                    }
+                    };
+                    self.parser.advance_token();
+                    c 
                 }
                 TokenKind::INT => {
-                    self.parser.get_token();
-                    match token.extra {
+                    let n = match token.extra {
                         TokenExtra::Int(n) => Expr::CInt(n),
                         _ => unreachable!("int"),
-                    }
+                    }; 
+                    self.parser.advance_token();
+                    n
                 }
                 TokenKind::Multiplication | TokenKind::Division | TokenKind::KMod => {
                     let kind = token.get_kind();
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     Expr::Binary(kind, None, None)
                 }
                 TokenKind::KAnd | TokenKind::KOr => {
                     let kind = token.get_kind();
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     Expr::Logical(kind, None, None)
                 }
                 TokenKind::Equal
@@ -858,15 +822,15 @@ impl AstRoot {
                 | TokenKind::Great
                 | TokenKind::GreatOrEqual => {
                     let kind = token.get_kind();
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     Expr::Comparison(kind, None, None)
                 }
                 TokenKind::KNot => {
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     Expr::Negation(None)
                 }
                 TokenKind::LParenthesis => {
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     let r = self.expr(true)?;
                     match self.match_expr(result, r) {
                         Ok(k) => {
@@ -899,7 +863,7 @@ impl AstRoot {
                         return self
                             .error(format!("Invalid Expression inside parenthesis: {:?}", r));
                     }
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     return Ok(*r);
                 }
                 TokenKind::Empty => {
@@ -916,14 +880,14 @@ impl AstRoot {
                 }
                 TokenKind::KNil => {
                     if result.is_none() {
-                        self.parser.get_token();
+                        self.parser.advance_token();
                         Expr::CNil
                     } else {
                         return self.error(format!("nil shouldn't follow {:?}", result.unwrap()));
                     }
                 }
                 TokenKind::KNilQ => {
-                    if self.parser.get_token().get_kind() == TokenKind::LParenthesis {
+                    if self.parser.advance_token().get_kind() == TokenKind::LParenthesis {
                         // self.parser.get_token();
                         let s = self.expr(false)?;
                         match s {
@@ -939,7 +903,7 @@ impl AstRoot {
                     }
                 }
                 TokenKind::KHead => {
-                    if self.parser.get_token().get_kind() == TokenKind::LParenthesis {
+                    if self.parser.advance_token().get_kind() == TokenKind::LParenthesis {
                         // self.parser.get_token();
                         let s = self.expr(false)?;
                         match s {
@@ -955,7 +919,7 @@ impl AstRoot {
                     }
                 }
                 TokenKind::KTail => {
-                    if self.parser.get_token().get_kind() == TokenKind::LParenthesis {
+                    if self.parser.advance_token().get_kind() == TokenKind::LParenthesis {
                         // self.parser.get_token();
                         let s = self.expr(false)?;
                         match s {
@@ -971,13 +935,13 @@ impl AstRoot {
                     }
                 }
                 TokenKind::KNew => {
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     let ctype = self.partial_var_type()?;
                     let s = self.expr(is_paranthesis)?;
                     if self.read_token().get_kind() == TokenKind::RBracket
                         && s.get_type() == TypeDecl::Int
                     {
-                        self.parser.get_token();
+                        self.parser.advance_token();
                         return Ok(Expr::NewArray(ctype, s.bx()));
                     } else {
                         return self.error("new array definition mistake");
@@ -987,7 +951,7 @@ impl AstRoot {
                     if result.is_some() {
                         let head = result.unwrap();
                         if head.is_valid() {
-                            self.parser.get_token();
+                            self.parser.advance_token();
                             let tail = self.expr(false)?;
                             match tail.get_type() {
                                 TypeDecl::Nil => {
@@ -1036,27 +1000,27 @@ impl AstRoot {
             if r.is_valid() {
                 Ok(*r)
             } else {
-                self.error("Ast: Invalid expression")
+                self.error("Invalid expression")
             }
         } else {
             self.error("failed to parse expression")
         }
     }
 
-    pub fn func_decl(&mut self) -> Result<FuncDecl, AstError> {
+    pub fn func_decl(&mut self) -> Result<FuncDecl, Error> {
         match self.parser.read_token().get_kind() {
             TokenKind::KDecl => {
-                let t = match self.parser.get_token().get_kind() {
+                let t = match self.parser.advance_token().get_kind() {
                     TokenKind::Name => None,
                     TokenKind::KList | TokenKind::KInt | TokenKind::KChar | TokenKind::KBool => {
                         Some(self.var_type()?)
                     }
                     e => {
-                        return Err(AstError::with_message(
+                        return Err(Error::with_message(
                             self.parser.column,
                             self.parser.line,
-                            &format!("Ast: Wrong token in Function definition: {:?}", e),
-                        ))
+                            &format!("Wrong token in Function definition: {:?}", e),
+                        "Ast"))
                     }
                 };
                 let name = match self.read_token() {
@@ -1065,23 +1029,24 @@ impl AstRoot {
                         extra: TokenExtra::Name(n),
                         ..
                     } => {
-                        self.parser.get_token();
-                        n
+                        let na = n.to_string();
+                        self.parser.advance_token();
+                        na
                     }
                     e => {
-                        return Err(AstError::with_message(
+                        return Err(Error::with_message(
                             self.parser.column,
                             self.parser.line,
-                            &format!("Ast: Wrong token in Function definition: {:?}", e),
-                        ))
+                            &format!("Wrong token in Function definition: {:?}", e),
+                        "Ast"))
                     }
                 };
                 if self.read_token().get_kind() != TokenKind::LParenthesis {
-                    return Err(AstError::with_message(
+                    return Err(Error::with_message(
                         self.parser.column,
                         self.parser.line,
-                        "Ast: Expected LParenthesis next to function name",
-                    ));
+                        "Expected LParenthesis next to function name",
+                    "Ast"));
                 }
                 let args = self.formal_def()?;
                 let a = match t.clone() {
@@ -1091,41 +1056,41 @@ impl AstRoot {
                 match a {
                     Ok(()) => (),
                     Err(e) => {
-                        return Err(AstError::with_message(
+                        return Err(Error::with_message(
                             self.parser.column,
                             self.parser.line,
                             &format!("Ast Def: {}", e),
-                        ))
+                        "Ast"))
                     }
                 }
                 Ok(FuncDecl {
                     rtype: t,
-                    name,
+                    name: name.to_owned(),
                     arguments: args,
                 })
             }
-            e => Err(AstError::with_message(
+            e => Err(Error::with_message(
                 self.parser.column,
                 self.parser.line,
-                &format!("Ast: failed to find function decl: {:?}", e),
-            )),
+                &format!("failed to find function decl: {:?}", e),
+            "Ast")),
         }
     }
 
-    pub fn func_def(&mut self) -> Result<FuncDef, AstError> {
+    pub fn func_def(&mut self) -> Result<FuncDef, Error> {
         match self.parser.read_token().get_kind() {
             TokenKind::KDef => {
-                let t = match self.parser.get_token().get_kind() {
+                let t = match self.parser.advance_token().get_kind() {
                     TokenKind::Name => None,
                     TokenKind::KList | TokenKind::KInt | TokenKind::KChar | TokenKind::KBool => {
                         Some(self.var_type()?)
                     }
                     e => {
-                        return Err(AstError::with_message(
+                        return Err(Error::with_message(
                             self.parser.column,
                             self.parser.line,
-                            &format!("Ast: Wrong token in Function definition: {:?}", e),
-                        ))
+                            &format!("Wrong token in Function definition: {:?}", e),
+                        "Ast"))
                     }
                 };
                 let name = match self.read_token() {
@@ -1134,15 +1099,16 @@ impl AstRoot {
                         extra: TokenExtra::Name(n),
                         ..
                     } => {
-                        self.parser.get_token();
-                        n
+                        let na = n.to_string();
+                        self.parser.advance_token();
+                        na
                     }
                     e => {
-                        return Err(AstError::with_message(
+                        return Err(Error::with_message(
                             self.parser.column,
                             self.parser.line,
-                            &format!("Ast: Wrong token in Function definition: {:?}", e),
-                        ))
+                            &format!("Wrong token in Function definition: {:?}", e),
+                        "Ast"))
                     }
                 };
 
@@ -1153,25 +1119,25 @@ impl AstRoot {
                     .insert(&name, t.clone().unwrap_or(TypeDecl::Void));
                 self.symbol_table.open_scope(&name);
                 if self.read_token().get_kind() != TokenKind::LParenthesis {
-                    return Err(AstError::with_message(
+                    return Err(Error::with_message(
                         self.parser.column,
                         self.parser.line,
-                        "Ast: Expected LParenthesis next to function name",
-                    ));
+                        "Expected LParenthesis next to function name",
+                    "Ast"));
                 }
 
                 let args = self.formal_def()?;
                 match self.read_token().get_kind() {
                     TokenKind::Colon => (),
                     e => {
-                        return Err(AstError::with_message(
+                        return Err(Error::with_message(
                             self.parser.column,
                             self.parser.line,
-                            &format!("Ast: Function Definition end with colon, but got: {:?}", e),
-                        ))
+                            &format!("Function Definition end with colon, but got: {:?}", e),
+                        "Ast"))
                     }
                 };
-                self.parser.get_token();
+                self.parser.advance_token();
 
                 let a = match t.clone() {
                     Some(i) => self.symbol_table.insert(&name, i),
@@ -1181,11 +1147,11 @@ impl AstRoot {
                 match a {
                     Ok(()) => (),
                     Err(e) => {
-                        return Err(AstError::with_message(
+                        return Err(Error::with_message(
                             self.parser.column,
                             self.parser.line,
                             &format!("Ast Def: {}", e),
-                        ))
+                        "Ast"))
                     }
                 }
 
@@ -1195,6 +1161,7 @@ impl AstRoot {
                 let mut stmts = Vec::new();
 
                 loop {
+                    
                     match self.read_token().get_kind() {
                         TokenKind::KDef => defs.push(self.func_def()?),
                         TokenKind::KDecl => decls.push(self.func_decl()?),
@@ -1210,7 +1177,7 @@ impl AstRoot {
                 while self.read_token().get_kind() != TokenKind::KEnd {
                     stmts.push(self.stmt()?);
                 }
-                self.parser.get_token();
+                self.parser.advance_token();
                 // self.parser.get_token();
                 // self.current_block_name = old_name;
                 self.symbol_table.close_scope();
@@ -1222,7 +1189,7 @@ impl AstRoot {
                 // match a {
                 //     Ok(()) => (),
                 //     Err(e) => {
-                //         return Err(AstError::with_message(
+                //         return Err(Error::with_message(
                 //             self.parser.column,
                 //             self.parser.line,
 
@@ -1232,7 +1199,7 @@ impl AstRoot {
                 // }
                 Ok(FuncDef {
                     rtype: t,
-                    name,
+                    name: name.to_owned(),
                     arguments: args,
                     decls,
                     defs,
@@ -1240,93 +1207,93 @@ impl AstRoot {
                     stmts,
                 })
             }
-            e => Err(AstError::with_message(
+            e => Err(Error::with_message(
                 self.parser.column,
                 self.parser.line,
-                &format!("Ast: failed to find function decl: {:?}", e),
-            )),
+                &format!("failed to find function decl: {:?}", e),
+            "Ast")),
         }
     }
 
-    pub fn stmt(&mut self) -> Result<Stmt, AstError> {
+    pub fn stmt(& mut self) -> Result<Stmt, Error> {
         let t = self.read_token();
         match t.get_kind() {
             TokenKind::Name => {
                 let atom = self.atom()?;
                 match self.read_token().get_kind() {
                     TokenKind::Assignement => {
-                        self.parser.get_token();
+                        self.parser.advance_token();
                         
                         let expr = self.expr(false)?;
                         if atom.get_type() != expr.get_type()  {
-                            return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: Assigment requires that the variable is the same type as the expression, but {:?}:={:?}",atom.get_type(),expr.get_type())));
+                            return Err(Error::with_message(self.parser.column, self.parser.line, &format!("Assigment requires that the variable is the same type as the expression, but {:?}:={:?}",atom.get_type(),expr.get_type()),"Ast"));
                         }
                         Ok(Stmt::Assign(atom,expr))
                     },
                     _ => {
                         match atom {
                             Atomic::FuncCall(_,n,a) => Ok(Stmt::Call(n,a)),
-                            e => Err(AstError::with_message(self.parser.column, self.parser.line, &format!("An atomic expression is not a stmt unless it is a call, here it was: {:?}",e)))   
+                            e => Err(Error::with_message(self.parser.column, self.parser.line, &format!("An atomic expression is not a stmt unless it is a call, here it was: {:?}",e),"Ast"))   
                         }
                     }
                 }
             }
             TokenKind::KSkip => {
-                self.parser.get_token();
+                self.parser.advance_token();
                 Ok(Stmt::Skip)
             }
             TokenKind::KExit => {
-                self.parser.get_token();
+                self.parser.advance_token();
                 Ok(Stmt::Exit)
             }
             TokenKind::KReturn => {
-                self.parser.get_token();
+                self.parser.advance_token();
                 Ok(Stmt::Return(Box::new(self.expr(false)?)))
             }
             TokenKind::KFor => {
-                self.parser.get_token();
+                self.parser.advance_token();
                 let mut first_simples = Vec::new();
                 loop {
                     let s = self.stmt()?;
                     match s {
                         Stmt::Skip | Stmt::Assign(..) | Stmt::Call(..) => (),
                         e => {
-                            return Err(AstError::with_message(
+                            return Err(Error::with_message(
                                 self.parser.column,
                                 self.parser.line,
-                                &format!("Ast: Expected simple Statement but got: {:?}", e),
-                            ))
+                                &format!("Expected simple Statement but got: {:?}", e),
+                            "Ast"))
                         }
                     }
                     first_simples.push(s);
                     match self.read_token().get_kind() {
                         TokenKind::Comma => {
-                            self.parser.get_token();
+                            self.parser.advance_token();
                             continue;
                         }
                         TokenKind::Semicolon => break,
                         e => {
-                            return Err(AstError::with_message(
+                            return Err(Error::with_message(
                                 self.parser.column,
                                 self.parser.line,
-                                &format!("Ast: Expected \",\" or \";\" but got: {:?}", e),
-                            ))
+                                &format!("Expected \",\" or \";\" but got: {:?}", e),
+                            "Ast"))
                         }
                     }
                 }
-                self.parser.get_token();
+                self.parser.advance_token();
                 let cond = self.expr(false)?;
                 if cond.get_type() != TypeDecl::Bool {
-                    return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: condition of For statement should reduce to bool but instead got: {:?}",cond)));
+                    return Err(Error::with_message(self.parser.column, self.parser.line, &format!("condition of For statement should reduce to bool but instead got: {:?}",cond),"Ast"));
                 }
                 match self.read_token().get_kind() {
-                    TokenKind::Semicolon => self.parser.get_token(),
+                    TokenKind::Semicolon => self.parser.advance_token(),
                     e => {
-                        return Err(AstError::with_message(
+                        return Err(Error::with_message(
                             self.parser.column,
                             self.parser.line,
-                            &format!("Ast: Expected simple Statement but got: {:?}", e),
-                        ))
+                            &format!("Expected simple Statement but got: {:?}", e),
+                        "Ast"))
                     }
                 };
                 let mut second_simples = Vec::new();
@@ -1335,45 +1302,45 @@ impl AstRoot {
                     match s {
                         Stmt::Skip | Stmt::Assign(..) | Stmt::Call(..) => (),
                         e => {
-                            return Err(AstError::with_message(
+                            return Err(Error::with_message(
                                 self.parser.column,
                                 self.parser.line,
-                                &format!("Ast: Expected simple Statement but got: {:?}", e),
-                            ))
+                                &format!("Expected simple Statement but got: {:?}", e),
+                            "Ast"))
                         }
                     }
                     second_simples.push(s);
                     match self.read_token().get_kind() {
                         TokenKind::Comma => {
-                            self.parser.get_token();
+                            self.parser.advance_token();
                             continue;
                         }
                         TokenKind::Colon => break,
                         e => {
-                            return Err(AstError::with_message(
+                            return Err(Error::with_message(
                                 self.parser.column,
                                 self.parser.line,
-                                &format!("Ast: Expected \",\" or \":\" but got: {:?}", e),
-                            ))
+                                &format!("Expected \",\" or \":\" but got: {:?}", e),
+                            "Ast"))
                         }
                     }
                 }
-                self.parser.get_token();
+                self.parser.advance_token();
                 let mut body = Vec::new();
                 while self.read_token().get_kind() != TokenKind::KEnd {
                     body.push(self.stmt()?);
                 }
-                self.parser.get_token();
+                self.parser.advance_token();
 
                 Ok(Stmt::For(first_simples, cond, second_simples, body))
             }
             TokenKind::KIf => {
-                self.parser.get_token();
+                self.parser.advance_token();
                 let cond = self.expr(false)?;
                 match cond {
                     Expr::CBool(..) | Expr::Atomic(TypeDecl::Bool,_)|
                     Expr::Comparison(..) | Expr::Negation(..) | Expr::NilCheck(..) => (),
-                    e => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: condition of If statement should reduce to bool but instead got: {:?}",e))),
+                    e => return Err(Error::with_message(self.parser.column, self.parser.line, &format!("condition of If statement should reduce to bool but instead got: {:?}",e),"Ast")),
                 }
                 let mut elseifs = ElseIfBlock::new();
                 let mut elseblock = Vec::new();
@@ -1381,14 +1348,14 @@ impl AstRoot {
                 match self.read_token().get_kind() {
                     TokenKind::Colon => (),
                     c => {
-                        return Err(AstError::with_message(
+                        return Err(Error::with_message(
                             self.parser.column,
                             self.parser.line,
                             &format!("Expect Colon after If block's expression but got: {:?}", c),
-                        ))
+                        "Ast"))
                     }
                 }
-                self.parser.get_token();
+                self.parser.advance_token();
                 //if block
                 while self.read_token().get_kind() != TokenKind::KElseif
                     && self.read_token().get_kind() != TokenKind::KElse
@@ -1398,26 +1365,26 @@ impl AstRoot {
                 }
                 // self.parser.get_token();
                 while self.read_token().get_kind() == TokenKind::KElseif {
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     let cond = self.expr(false)?;
                     match cond {
                         Expr::Comparison(..) | Expr::Negation(..) | Expr::NilCheck(..) => (),
-                        e => return Err(AstError::with_message(self.parser.column, self.parser.line, &format!("Ast: condition of elif statement should reduce to bool but instead got: {:?}",e))),
+                        e => return Err(Error::with_message(self.parser.column, self.parser.line, &format!("condition of elif statement should reduce to bool but instead got: {:?}",e),"Ast")),
                     }
                     match self.read_token().get_kind() {
                         TokenKind::Colon => (),
                         c => {
-                            return Err(AstError::with_message(
+                            return Err(Error::with_message(
                                 self.parser.column,
                                 self.parser.line,
                                 &format!(
                                     "Expect Colon after ElseIf block's expression but got: {:?}",
                                     c
                                 ),
-                            ))
+                            "Ast"))
                         }
                     }
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     let mut local_stmts = Vec::new();
                     //if block
                     while self.read_token().get_kind() != TokenKind::KElseif
@@ -1429,24 +1396,24 @@ impl AstRoot {
                     elseifs.push((cond, local_stmts));
                 }
                 if self.read_token().get_kind() == TokenKind::KElse {
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     match self.read_token().get_kind() {
                         TokenKind::Colon => (),
                         c => {
-                            return Err(AstError::with_message(
+                            return Err(Error::with_message(
                                 self.parser.column,
                                 self.parser.line,
                                 &format!("Expect Colon after Else keyword but got: {:?}", c),
-                            ))
+                            "Ast"))
                         }
                     }
-                    self.parser.get_token();
+                    self.parser.advance_token();
 
                     while self.read_token().get_kind() != TokenKind::KEnd {
                         elseblock.push(self.stmt()?);
                     }
                 }
-                self.parser.get_token();
+                self.parser.advance_token();
                 Ok(Stmt::If {
                     condition: cond,
                     stmts,
@@ -1454,42 +1421,42 @@ impl AstRoot {
                     elseblock,
                 })
             }
-            e => Err(AstError::with_message(
+            e => Err(Error::with_message(
                 self.parser.column,
                 self.parser.line,
                 &format!(
                     "Ast failed to parse statement: {:?} with extra; {:?}, pre:{:?}",
                     e,
                     self.read_token(),
-                    self.parser.previous
+                    self.parser.previous_token()
                 ),
-            )),
+            "Ast")),
         }
     }
 
-    pub fn formal_def(&mut self) -> Result<Vec<FormalDecl>, AstError> {
+    pub fn formal_def(&mut self) -> Result<Vec<FormalDecl>, Error> {
         match self.parser.read_token().get_kind() {
-            TokenKind::LParenthesis => self.parser.get_token(),
+            TokenKind::LParenthesis => self.parser.advance_token(),
             e => {
-                return Err(AstError::with_message(
+                return Err(Error::with_message(
                     self.parser.column,
                     self.parser.line,
                     &format!(
-                        "Ast: formal definitions start with parenthesis but I was given: {:?}",
+                        "formal definitions start with parenthesis but I was given: {:?}",
                         e
                     ),
-                ))
+                "Ast"))
             }
         };
         if self.read_token().get_kind() == TokenKind::RParenthesis {
-            self.parser.get_token();
+            self.parser.advance_token();
             return Ok(Vec::new());
         };
         let mut results = Vec::new();
         loop {
             let is_ref = match self.parser.read_token().get_kind() {
                 TokenKind::KRef => {
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     true
                 }
                 _ => false,
@@ -1497,7 +1464,7 @@ impl AstRoot {
 
             let defs = match self.var_def() {
                 Ok(v) => v,
-                Err(e) => return Err(e.extend("Ast: Inside formal")),
+                Err(e) => return Err(e.extend("Inside formal","Ast")),
             };
             let i = defs.iter().map(|x| FormalDecl {
                 is_ref,
@@ -1505,17 +1472,17 @@ impl AstRoot {
             });
             results.extend(i);
             match self.parser.read_token().get_kind() {
-                TokenKind::Semicolon => self.parser.get_token(),
+                TokenKind::Semicolon => self.parser.advance_token(),
                 TokenKind::RParenthesis => {
-                    self.parser.get_token();
+                    self.parser.advance_token();
                     break;
                 }
                 e => {
-                    return Err(AstError::with_message(
+                    return Err(Error::with_message(
                         self.parser.column,
                         self.parser.line,
                         &format!("unxpected token: {:?}", e),
-                    ))
+                    "Ast"))
                 }
             };
         }

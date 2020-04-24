@@ -1,11 +1,10 @@
 use core::fmt::Debug;
 use std::collections::HashMap;
-use std::rc::Rc;
 
 #[derive(Debug, Clone)]
 struct Scope<T> {
     name: String,
-    locals: HashMap<String, SymbolEntry<T>>,
+    locals: HashMap<String, T>,
 }
 
 impl<T: Debug + Clone> Scope<T> {
@@ -26,14 +25,14 @@ impl<T: Debug + Clone> Scope<T> {
             ));
         } else {
             self.locals
-                .insert(name.as_ref().to_owned(), SymbolEntry::new(data));
+                .insert(name.as_ref().to_owned(), data);
         }
         Ok(())
     }
 
-    pub fn lookup<S: AsRef<str>>(&self, name: S) -> Option<Rc<SymbolEntry<T>>> {
+    pub fn lookup<S: AsRef<str>>(&self, name: S) -> Option<&T> {
         if self.locals.contains_key(name.as_ref()) {
-            Some(Rc::new(self.locals[name.as_ref()].clone()))
+            self.locals.get(name.as_ref())
         } else {
             None
         }
@@ -63,7 +62,7 @@ impl<T: Debug + Clone> SymbolTable<T> {
         }
     }
 
-    pub fn lookup<S: AsRef<str>>(&self, name: S) -> Option<Rc<SymbolEntry<T>>> {
+    pub fn lookup<S: AsRef<str>>(&self, name: S) -> Option<&T> {
         self.scopes
             .iter()
             .rev()

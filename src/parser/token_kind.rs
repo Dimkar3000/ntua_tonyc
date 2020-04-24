@@ -1,6 +1,8 @@
-/// TokenKind represents the different token that the input is split into.
-/// 
-/// Error is a special case, representing failure parsing a token
+/// # TokenKind
+/// - it represents the different tokens that the input is split into.
+///
+/// - ## Error
+///   if the text parsed is not valid for the language the parser returns Error
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum TokenKind {
     Addition,

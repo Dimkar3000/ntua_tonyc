@@ -1,5 +1,5 @@
 pub mod ast;
 pub mod codegen;
-pub mod intinsics;
+pub mod error;
 pub mod parser;
 pub mod symbol_table;

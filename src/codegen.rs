@@ -17,6 +17,7 @@ use inkwell::targets::*;
 use inkwell::types::*;
 use inkwell::values::*;
 use inkwell::AddressSpace;
+use inkwell::passes::*;
 use inkwell::OptimizationLevel;
 
 use crate::ast::*;
@@ -241,9 +242,9 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
-    pub fn compile(&mut self, ast: &mut AstRoot) -> Result<(), String> {
+    pub fn compile<'a>(&mut self, ast: &'a mut AstRoot<'a>) -> Result<(), String> {
         // Build Ast
-        ast.parser.get_token();
+        ast.parser.advance_token();
         let main = ast.func_def();
         if main.is_err() {
             return Err(format!("{}", main.unwrap_err()));
@@ -262,6 +263,20 @@ impl<'ctx> CodeGen<'ctx> {
         if let Err(e) = self.module.verify() {
             eprintln!("verify error: {}", e);
         }
+        let pass_manager_builder = PassManagerBuilder::create();
+        pass_manager_builder.set_optimization_level(OptimizationLevel::Aggressive);
+        let fpm = PassManager::create(());
+        pass_manager_builder.populate_module_pass_manager(&fpm);
+        fpm.add_argument_promotion_pass();
+        fpm.add_constant_propagation_pass();
+        fpm.add_constant_merge_pass();
+        fpm.add_aggressive_dce_pass();
+        fpm.add_instruction_combining_pass();
+        fpm.add_cfg_simplification_pass();
+        fpm.add_strip_dead_prototypes_pass();
+        fpm.add_dead_arg_elimination_pass();
+        fpm.add_tail_call_elimination_pass();
+        assert!(fpm.run_on(&self.module));
         // self.module.print_to_file("test.ll");
         // Build Object file
         Target::initialize_native(&InitializationConfig::default())
