@@ -42,6 +42,17 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
+    fn typed_size_of(&self, ctype: &BasicTypeEnum<'ctx>) -> Option<IntValue<'ctx>> {
+        match &ctype {
+            BasicTypeEnum::ArrayType(v) => v.size_of(),
+            BasicTypeEnum::IntType(v) => Some(v.size_of()),
+            BasicTypeEnum::FloatType(v) => Some(v.size_of()),
+            BasicTypeEnum::PointerType(v) => Some(v.size_of()),
+            BasicTypeEnum::StructType(v) => v.size_of(),
+            BasicTypeEnum::VectorType(v) => v.size_of(),
+        }
+    }
+
     fn typedecl_to_type(&self, t: &TypeDecl) -> BasicTypeEnum<'ctx> {
         match t {
             TypeDecl::Bool => self.context.bool_type().into(),
@@ -150,13 +161,14 @@ impl<'ctx> CodeGen<'ctx> {
 impl<'ctx> CodeGen<'ctx> {
     pub fn new(context: &'ctx Context, module: Module<'ctx>) -> Self {
         let mut std = HashMap::new();
-        // Function: decl puti (int n)
 
-        let exitt = context
-            .void_type()
-            .fn_type(&[context.i8_type().into()], false);
-        let exit = module.add_function("exit", exitt, Some(Linkage::External));
-        std.insert("exit".to_owned(), exit);
+        let gc_malloct = context
+            .i8_type()
+            .ptr_type(AddressSpace::Generic)
+            .fn_type(&[context.i64_type().into()], false);
+        let gc_malloc = module.add_function("GC_malloc", gc_malloct, Some(Linkage::External));
+        std.insert("GC_malloc".to_owned(), gc_malloc);
+
         let strlent = context.i16_type().fn_type(
             &[context.i8_type().ptr_type(AddressSpace::Generic).into()],
             false,
@@ -250,11 +262,11 @@ impl<'ctx> CodeGen<'ctx> {
         if let Err(e) = self.module.verify() {
             eprintln!("verify error: {}", e);
         }
-        self.module.print_to_file("test.ll");
+        // self.module.print_to_file("test.ll");
         // Build Object file
         Target::initialize_native(&InitializationConfig::default())
             .expect("Failed to initialize native target");
-        let opt = OptimizationLevel::Default;
+        let opt = OptimizationLevel::Aggressive;
         let reloc = RelocMode::Default;
         let model = CodeModel::Default;
         let path = Path::new("./target/main.o");
@@ -270,16 +282,17 @@ impl<'ctx> CodeGen<'ctx> {
             )
             .unwrap();
         self.module.print_to_file("./test.ll").unwrap();
-        target_machine
-            .write_to_file(&self.module, FileType::Object, path)
-            .unwrap();
+        match target_machine.write_to_file(&self.module, FileType::Object, path) {
+            Ok(()) => (),
+            Err(e) => eprintln!("{}", e),
+        };
 
         /*****************
             Extra steps
         *****************/
         // Build STD
         let s = Command::new("clang++")
-            .args(&["-c", "-g", "-o", "target/libtonystd.o", "libtonystd.cpp"])
+            .args(&["-c", "-O3", "-o", "target/libtonystd.o", "libtonystd.cpp"])
             .output()
             .expect("failed");
         if !s.status.success() {
@@ -290,7 +303,12 @@ impl<'ctx> CodeGen<'ctx> {
         print!("compiling {}\n", s.status);
         // Linking STD
         let r = Command::new("clang++")
-            .args(&[path.to_str().unwrap(), "target/libtonystd.o"])
+            .args(&[
+                "-O3",
+                path.to_str().unwrap(),
+                "target/libtonystd.o",
+                "llvm/gc-8.0.4/build/Release/gcmt-lib.lib",
+            ])
             .output()
             .expect("failed to link");
 
@@ -309,6 +327,7 @@ impl<'ctx> CodeGen<'ctx> {
     fn compile_func(&mut self, func: &FuncDef) {
         // Function Signature
         let function = self.funcdef_to_function(&func);
+        // function.set_gc("simongc");
         let entry_block = self
             .context
             .append_basic_block(function, &format!("{}_entry", func.name));
@@ -351,10 +370,7 @@ impl<'ctx> CodeGen<'ctx> {
         for i in &func.vars {
             let t = self.typedecl_to_type(&i.var_type);
             let p = match &i.var_type {
-                TypeDecl::List(t) => {
-                    let ct = self.typedecl_to_type(&TypeDecl::List(t.clone()));
-                    self.create_typed_nil(&ct, true).into_pointer_value()
-                }
+                TypeDecl::List(_) => self.create_typed_nil(&t, true).into_pointer_value(),
                 _ => self
                     .builder
                     .build_alloca(t, &format!("{}_{}", func.name, i.name)),
@@ -375,7 +391,6 @@ impl<'ctx> CodeGen<'ctx> {
             self.variable_list.pop();
         }
 
-        
         // Compile Function definitions
         for i in &func.defs {
             self.compile_func(i);
@@ -560,7 +575,6 @@ impl<'ctx> CodeGen<'ctx> {
             Stmt::Assign(atom, exp) => {
                 let ptr = self.get_atom(atom);
                 let value = self.compile_exp(exp, false);
-
                 if value.is_pointer_value()
                     && value.into_pointer_value().is_null()
                     && value.into_pointer_value().is_const()
@@ -644,6 +658,8 @@ impl<'ctx> CodeGen<'ctx> {
                         v.push(r);
                     }
                 }
+                // println!("function: {:?}", function);
+                // println!("args: {:?}", v);
                 let result = self
                     .builder
                     .build_call(function, &v, &format!("call_{}", name))
@@ -665,7 +681,18 @@ impl<'ctx> CodeGen<'ctx> {
         ctype: &BasicTypeEnum<'ctx>,
         is_ref: bool,
     ) -> BasicValueEnum<'ctx> {
-        let new_tail = self.builder.build_malloc(*ctype, "nil_tail").unwrap();
+        let gc_malloc = self.global_funcs.get("GC_malloc").unwrap();
+        let size = ctype.into_struct_type().size_of().unwrap().into();
+        let data = self.builder.build_call(*gc_malloc, &[size], "GC_malloc");
+        let new_tail = self
+            .builder
+            .build_bitcast(
+                data.try_as_basic_value().left().unwrap(),
+                ctype.into_struct_type().ptr_type(AddressSpace::Generic),
+                "cast_gc",
+            )
+            .into_pointer_value();
+
         let flag = unsafe {
             self.builder.build_in_bounds_gep(
                 new_tail,
@@ -698,11 +725,36 @@ impl<'ctx> CodeGen<'ctx> {
                     self.create_typed_nil(&ctype, true)
                 } else {
                     // Copy data to new ptr
-                    let p = self.builder.build_malloc(ctype, "tail").unwrap();
+                    let gc_malloc = self.global_funcs.get("GC_malloc").unwrap();
+                    let size = self.typed_size_of(&ctype).unwrap();
+                    let data = self
+                        .builder
+                        .build_call(*gc_malloc, &[size.into()], "GC_malloc");
+                    let p = self
+                        .builder
+                        .build_bitcast(
+                            data.try_as_basic_value().left().unwrap(),
+                            ctype.into_struct_type().ptr_type(AddressSpace::Generic),
+                            "cast_gc",
+                        )
+                        .into_pointer_value();
+
                     self.builder.build_store(p, tail_data);
                     p.into()
                 };
-                let head = self.builder.build_malloc(ctype, "head_malloc").unwrap();
+                let gc_malloc = self.global_funcs.get("GC_malloc").unwrap();
+                let size = self.typed_size_of(&ctype).unwrap();
+                let gc_data = self
+                    .builder
+                    .build_call(*gc_malloc, &[size.into()], "GC_malloc");
+                let head = self
+                    .builder
+                    .build_bitcast(
+                        gc_data.try_as_basic_value().left().unwrap(),
+                        ctype.into_struct_type().ptr_type(AddressSpace::Generic),
+                        "cast_gc",
+                    )
+                    .into_pointer_value();
                 let data_ptr = unsafe {
                     self.builder.build_in_bounds_gep(
                         head,
@@ -822,14 +874,23 @@ impl<'ctx> CodeGen<'ctx> {
                     .build_load(ptr, &format!("{:?}_ptr_{}", t, at.get_name()));
                 result
             }
-            Expr::NewArray(TypeDecl::Array(t), exp) => {
+            Expr::NewArray(t, exp) => {
                 let t = self.typedecl_to_type(&*t);
                 let size = self.compile_exp(exp, false);
                 assert!(size.is_int_value());
+                let size = self.builder.build_int_cast(
+                    size.into_int_value(),
+                    self.context.i64_type(),
+                    "upcast",
+                );
+                let t_size = self.typed_size_of(&t).unwrap();
+                let total_size = self.builder.build_int_add(size, t_size, "array_size");
+                let gc_malloc = self.global_funcs.get("GC_malloc").unwrap();
+                let data = self
+                    .builder
+                    .build_call(*gc_malloc, &[total_size.into()], "GC_malloc");
                 self.builder
-                    .build_array_malloc(t, size.into_int_value(), "malloc")
-                    .unwrap()
-                    .into()
+                    .build_bitcast(data.try_as_basic_value().left().unwrap(), t, "cast_gc")
             }
             Expr::Binary(t, x, y) => {
                 let x = self

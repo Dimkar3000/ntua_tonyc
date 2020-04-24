@@ -1,64 +1,7 @@
 use core::fmt::Debug;
-use peekmore::PeekMore;
 
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum TokenKind {
-    Addition,
-    Assignement,
-    CChar,
-    CString,
-    Colon,
-    Comma,
-    Comment,
-    Division,
-    Empty,
-    Equal,
-    Error,
-    Great,
-    GreatOrEqual,
-    Hash,
-    INT,
-    KAnd,
-    KBool,
-    KChar,
-    KDecl,
-    KDef,
-    KElse,
-    KElseif,
-    KEnd,
-    KExit,
-    KFalse,
-    KFor,
-    KHead,
-    KIf,
-    KInt,
-    KList,
-    KMod,
-    KNew,
-    KNil,
-    KNilQ,
-    KNot,
-    KOr,
-    KRef,
-    KReturn,
-    KSkip,
-    KTail,
-    KTrue,
-    LBracket,
-    LParenthesis,
-    Less,
-    LessOrEqual,
-    Multiplication,
-    Name,
-    NewLine,
-    NotEqual,
-    NotStarted,
-    RBracket,
-    RParenthesis,
-    Semicolon,
-    Space,
-    Subtraction,
-}
+mod token_kind;
+pub use token_kind::TokenKind;
 
 #[derive(Debug, Clone)]
 pub enum TokenExtra {
@@ -95,7 +38,7 @@ impl Token {
         self.kind
     }
 
-    fn error(col: usize, line: usize, _message: &str) -> Self {
+    fn make_error(col: usize, line: usize, _message: &str) -> Self {
         Token {
             kind: TokenKind::Error,
             col,
@@ -104,7 +47,7 @@ impl Token {
         }
     }
 
-    fn int(col: usize, line: usize, stream: &str) -> Self {
+    fn make_int(col: usize, line: usize, stream: &str) -> Self {
         match stream.parse::<i16>() {
             Ok(e) => Token {
                 kind: TokenKind::INT,
@@ -121,7 +64,7 @@ impl Token {
         }
     }
 
-    fn cchar(col: usize, line: usize, c: char) -> Self {
+    fn make_cchar(col: usize, line: usize, c: char) -> Self {
         Token {
             kind: TokenKind::CChar,
             col,
@@ -129,7 +72,7 @@ impl Token {
             extra: TokenExtra::Cchar(c),
         }
     }
-    fn cstring(col: usize, line: usize, stream: String) -> Self {
+    fn make_cstring(col: usize, line: usize, stream: String) -> Self {
         Token {
             kind: TokenKind::CString,
             col,
@@ -336,7 +279,7 @@ impl Parser {
     // Ok: the character read and how much I advanced the index,
     // Err: the error token to return
     pub fn read_char(&mut self) -> Result<char, Token> {
-        let mut chr = self.stream[self.index..].chars().peekmore();
+        let mut chr = self.stream[self.index..].chars().peekable();
         let start = self.index;
 
         // check that there is smething after the first tick
@@ -376,7 +319,7 @@ impl Parser {
                 if let Some(c) = ch {
                     Ok(c)
                 } else {
-                    Err(Token::error(
+                    Err(Token::make_error(
                         self.column,
                         self.line,
                         &format!(
@@ -388,7 +331,7 @@ impl Parser {
             } // Escaped character should look to the next character,
             Some(e) => Ok(e),
             // Some(e) => Token::Char(e), // General, not escaped character
-            None => Err(Token::error(
+            None => Err(Token::make_error(
                 self.column,
                 self.line,
                 &"Failed to Parse Character. Stream empty!",
@@ -428,7 +371,7 @@ impl Parser {
             };
             return;
         }
-        let mut chr = self.stream[self.index..].chars().peekmore();
+        let mut chr = self.stream[self.index..].chars().peekable();
         // println!("Index: {:?}", self.index);
         // println!("Remaining: {:?}", self.stream[self.index..].to_string());
         if let Some(x) = chr.next() {
@@ -443,7 +386,7 @@ impl Parser {
                     }
                     // println!("{}",self.stream[start..=self.index].to_string());
                     self.token =
-                        Token::int(self.column, self.line, &self.stream[start..=self.index]);
+                        Token::make_int(self.column, self.line, &self.stream[start..=self.index]);
                 }
                 'a'..='z' | 'A'..='Z' => {
                     let start = self.index;
@@ -461,6 +404,7 @@ impl Parser {
                         ch = chr.next();
                     }
                     // filter keywords, everything else is a name
+                    // self.index += 1;
                     self.token =
                         Token::from_word(self.column, self.line, &self.stream[start..=self.index]);
                     // Everything else is a Name
@@ -475,8 +419,8 @@ impl Parser {
                             let c0 = self.read_char();
                             self.index -= 1; // Note(dimkar): this reset the index back because there is a global +1 at the end of next token and it will skip the next token
                             match c0 {
-                                Ok('\'') => Token::cchar(self.column, self.line, c),
-                                Ok(e) => Token::error(
+                                Ok('\'') => Token::make_cchar(self.column, self.line, c),
+                                Ok(e) => Token::make_error(
                                     self.column,
                                     self.line,
                                     &format!(
@@ -504,12 +448,12 @@ impl Parser {
                     self.index -= 1; // Note(dimkar): this reset the index back because there is a global +1 at the end of next token and it will skip the next token
                                      // println!("{:?}",self.stream.chars().nth(self.index));
                     self.token = match c {
-                        Err(e) => Token::error(
+                        Err(e) => Token::make_error(
                             self.column,
                             self.line,
                             &format!("Failed to parser String: Underline error: {:?}", e),
                         ),
-                        Ok('\"') => Token::cstring(self.column, self.line, result),
+                        Ok('\"') => Token::make_cstring(self.column, self.line, result),
                         Ok(e) => unreachable!("this should never happen {}", e),
                     };
                     // println!("here: {}",self.stream);
@@ -759,7 +703,7 @@ impl Parser {
                                 extra: TokenExtra::None,
                             }
                         }
-                        _ => Token::error(
+                        _ => Token::make_error(
                             self.column,
                             self.line,
                             "Erro: \\r not followed with \\n isn't allowed, how did you do that :D",
@@ -799,7 +743,7 @@ impl Parser {
                     };
                 }
                 e => {
-                    self.token = Token::error(
+                    self.token = Token::make_error(
                         self.column,
                         self.line,
                         &format!("Failed to parse character: \"{:?}\"", e),

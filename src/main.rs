@@ -55,25 +55,23 @@ fn main() -> Result<(), Box<dyn Error>> {
     let module = context.create_module("main");
     let mut codegen = CodeGen::new(&context, module);
 
-    // let sum = codegen
-    //     .jit_compile_sum()
-    //     .ok_or("Unable to JIT compile `sum`")?;
-    let mut ast = AstRoot::new(
-        "
-        def main():
-        int i
+    // let mut ast = AstRoot::new(
+    //     "
+    //     def main():
+    //     int i
 
-        for i:=0; i<100; i :=i +1 :
-        puti(i)
-        putc('\\n')
-        if i > 20:
-        puts(\"happend\n\")
-        exit
-        end
-        end
-        end
-        "
-    );
+    //     for i:=0; i<100; i :=i +1 :
+    //     puti(i)
+    //     putc('\\n')
+    //     if i > 20:
+    //     puts(\"happend\n\")
+    //     exit
+    //     end
+    //     end
+    //     end
+    //     "
+    // );
+
     // let mut ast = AstRoot::new(
     //     "def main ():
     //      def char[] reverse (char[] s):
@@ -107,7 +105,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     // let mut ast = AstRoot::new(
     //     "def main():
     //         list[int] j
-    //         int i 
+    //         int i
     //         def list[int] test():
     //             list[int] j
     //             j := 5 # j
@@ -136,7 +134,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     //                         x := head(l)
     //                     if x < pivot: lt := x # lt else: ge := x # ge end
     //                 end
-                    
     //                 return qsort_aux(lt, pivot # qsort_aux(ge, rest))
     //             end
     //         return qsort_aux(l, nil)
@@ -152,7 +149,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     //      end
     //      int seed, i
     //      list[int] l
-    
     //      seed := 65
     //      for i := 0, l := nil; i < 16; i := i+1:
     //      seed := (seed * 137 + 220 + i) mod 101
@@ -164,6 +160,33 @@ fn main() -> Result<(), Box<dyn Error>> {
     //      end
     //     ",
     // );
+
+    let mut ast = AstRoot::new(
+        "
+    def main():
+        def int fib(int n,p):
+            int a, b, j, i
+            if n = 0: return 0 
+            elif n = 1: return 1 
+            else :
+            a := 0
+            b := 1
+            for i:= 2, j:= 2; i<n; i:=i+1:
+            puti(j)
+            putc('\\n')
+            a := b
+            b := j
+            j := (a mod p + b mod p) mod p
+            end
+            end
+            return j
+        end
+        puts(\"result:\\n\")
+        puti(fib(1000,1000))
+        
+
+    end",
+    );
 
     // let mut ast = AstRoot::new(
     //     "def main ():

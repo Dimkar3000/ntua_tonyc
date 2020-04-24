@@ -679,6 +679,8 @@ impl AstRoot {
             return Ok(right);
         }
         let left = left.unwrap();
+        // eprintln!("left: {:?}",left);
+        // eprintln!("right: {:?}",right);
         // high operator of binary and low in proriority
         let high = |t| {
             return t == TokenKind::Multiplication
@@ -695,6 +697,9 @@ impl AstRoot {
             // Bool is valid on the left only when followed by a comparison operator
             (Expr::Unary(t, None), a) if a.get_type() == TypeDecl::Int => {
                 Ok(Expr::Unary(t, Some(a.bx())))
+            },
+            (a, Expr::Binary(t, None, None)) if a.get_type() == TypeDecl::Int => {
+                Ok(Expr::Binary(t, Some(a.bx()), None))
             }
             (Expr::Binary(t, Some(a), b), Expr::Unary(t0, c)) => {
                 match self.match_expr(b, Expr::Unary(t0, c)) {
@@ -712,9 +717,7 @@ impl AstRoot {
                     Err(_) => Err(*left),
                 }
             }
-            (a, Expr::Binary(t, None, None)) if a.get_type() == TypeDecl::Int => {
-                Ok(Expr::Binary(t, Some(a.bx()), None))
-            }
+            
 
             (Expr::Binary(t, Some(a), b), Expr::CInt(n)) => match self.match_expr(b, Expr::CInt(n))
             {
@@ -782,6 +785,7 @@ impl AstRoot {
         let mut result: Option<Box<Expr>> = None;
         // let current_error;
         loop {
+            // println!("token: {:?}",self.parser.read_token());
             let token = self.read_token();
             let right = match token.get_kind() {
                 TokenKind::KTrue => {

@@ -1,4 +1,6 @@
-
+#ifdef _WIN32
+#pragma comment(lib, "user32")
+#endif
 #include <iostream>
 #include <string>
 #include <algorithm>
@@ -6,7 +8,6 @@
 #include <ios>
 
 #include <memory>
-
 
 extern "C" void puti(int16_t a)
 {

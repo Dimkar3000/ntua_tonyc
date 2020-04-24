@@ -1,4 +1,3 @@
-pub mod allocator;
 pub mod ast;
 pub mod codegen;
 pub mod intinsics;
