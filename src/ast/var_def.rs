@@ -1,0 +1,74 @@
+use crate::ast::TypeDecl;
+use crate::error::Error;
+use crate::parser::*;
+use crate::symbol_table::SymbolTable;
+
+#[derive(Debug, Clone)]
+pub struct VarDef {
+    pub name: String,
+    pub var_type: TypeDecl,
+}
+
+impl VarDef {
+    pub fn new(name: &str, var_type: TypeDecl) -> Self {
+        VarDef {
+            name: name.to_string(),
+            var_type,
+        }
+    }
+
+    pub fn generate(
+        parser: &mut Parser,
+        symbol_table: &mut SymbolTable<TypeDecl>,
+    ) -> Result<Vec<VarDef>, Error> {
+        let mut results = Vec::new();
+        let kind = &parser.read_token().get_kind();
+        if kind == &TokenKind::RParenthesis {
+            return Ok(Vec::new());
+        }
+        assert!(
+            kind == &TokenKind::KInt
+                || kind == &TokenKind::KChar
+                || kind == &TokenKind::KBool
+                || kind == &TokenKind::KList
+        );
+        match TypeDecl::generate(parser) {
+            Ok(t) => loop {
+                match parser.read_token().get_kind() {
+                    TokenKind::Name => match parser.read_token().extra {
+                        TokenExtra::Name(name) => {
+                            results.push(VarDef::new(&name, t.clone()));
+                            match symbol_table.insert(name, t.clone()) {
+                                Ok(_) => (),
+                                Err(e) => {
+                                    return Err(Error::with_message(
+                                        parser.column,
+                                        parser.line,
+                                        &e,
+                                        "Ast",
+                                    ))
+                                }
+                            }
+                            if parser.advance_token().get_kind() != TokenKind::Comma {
+                                break;
+                            }
+                            parser.advance_token();
+                        }
+                        _ => unreachable!("both kind and extra should be name"),
+                    },
+                    e => {
+                        return Err(Error::with_message(
+                            parser.column,
+                            parser.line,
+                            &format!("Expected name definition, found \"{:?}\"", e),
+                            "Ast",
+                        ))
+                    }
+                }
+            },
+            Err(e) => return Err(e.extend("variable definition failed", "Ast")),
+        };
+
+        Ok(results)
+    }
+}

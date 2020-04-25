@@ -13,11 +13,11 @@ use inkwell::module::Module;
 use inkwell::IntPredicate;
 
 use inkwell::module::Linkage;
+use inkwell::passes::*;
 use inkwell::targets::*;
 use inkwell::types::*;
 use inkwell::values::*;
 use inkwell::AddressSpace;
-use inkwell::passes::*;
 use inkwell::OptimizationLevel;
 
 use crate::ast::*;
@@ -90,7 +90,7 @@ impl<'ctx> CodeGen<'ctx> {
 
     fn funcdef_to_function(&mut self, func: &FuncDef) -> FunctionValue<'ctx> {
         let mut args = Vec::new();
-        for i in &func.arguments {
+        for i in &func.header.arguments {
             let t = self.typedecl_to_type(&i.def.var_type);
             if i.is_ref {
                 args.push(t.ptr_type(AddressSpace::Generic).into());
@@ -99,18 +99,18 @@ impl<'ctx> CodeGen<'ctx> {
             }
         }
         let fun_type;
-        if func.rtype.is_none() {
+        if func.header.rtype == TypeDecl::Void {
             fun_type = self.context.void_type().fn_type(&args, false);
         } else {
             fun_type = self
-                .typedecl_to_type(func.rtype.as_ref().unwrap())
+                .typedecl_to_type(&func.header.rtype)
                 .fn_type(&args, false);
         }
-        match self.module.get_function(&func.name) {
+        match self.module.get_function(&func.header.name) {
             Some(k) => k,
             None => {
-                let r = self.module.add_function(&func.name, fun_type, None);
-                self.store_function(func.name.clone(), r);
+                let r = self.module.add_function(&func.header.name, fun_type, None);
+                self.store_function(func.header.name.clone(), r);
                 r
             }
         }
@@ -127,12 +127,10 @@ impl<'ctx> CodeGen<'ctx> {
             }
         }
         let fun_type;
-        if func.rtype.is_none() {
+        if func.rtype == TypeDecl::Void {
             fun_type = self.context.void_type().fn_type(&args, false);
         } else {
-            fun_type = self
-                .typedecl_to_type(func.rtype.as_ref().unwrap())
-                .fn_type(&args, false);
+            fun_type = self.typedecl_to_type(&func.rtype).fn_type(&args, false);
         }
         match self.module.get_function(&func.name) {
             Some(k) => k,
@@ -244,13 +242,12 @@ impl<'ctx> CodeGen<'ctx> {
 
     pub fn compile<'a>(&mut self, ast: &'a mut AstRoot<'a>) -> Result<(), String> {
         // Build Ast
-        ast.parser.advance_token();
-        let main = ast.func_def();
+        let main = ast.generate();
         if main.is_err() {
             return Err(format!("{}", main.unwrap_err()));
         }
         let main = main.unwrap();
-        if main.arguments.len() != 0 || main.rtype.is_some() {
+        if main.header.arguments.len() != 0 || main.header.rtype != TypeDecl::Void {
             return Err("Top level Function shouldn't have argument or a return type".to_owned());
         }
 
@@ -345,24 +342,26 @@ impl<'ctx> CodeGen<'ctx> {
         // function.set_gc("simongc");
         let entry_block = self
             .context
-            .append_basic_block(function, &format!("{}_entry", func.name));
+            .append_basic_block(function, &format!("{}_entry", func.header.name));
         self.builder.position_at_end(entry_block);
 
         // Function arguments
-        for i in 0..func.arguments.len() {
+        for i in 0..func.header.arguments.len() {
             let t = function.get_nth_param(i as u32);
             match t {
                 Some(p) => {
-                    if func.arguments[i].is_ref && p.is_pointer_value() {
-                        self.variable_list
-                            .push((func.arguments[i].def.name.clone(), p.into_pointer_value()));
+                    if func.header.arguments[i].is_ref && p.is_pointer_value() {
+                        self.variable_list.push((
+                            func.header.arguments[i].def.name.clone(),
+                            p.into_pointer_value(),
+                        ));
                     } else {
                         let ptr = self
                             .builder
-                            .build_alloca(p.get_type(), &func.arguments[i].def.name);
+                            .build_alloca(p.get_type(), &func.header.arguments[i].def.name);
                         self.builder.build_store(ptr, p);
                         self.variable_list
-                            .push((func.arguments[i].def.name.clone(), ptr));
+                            .push((func.header.arguments[i].def.name.clone(), ptr));
                     }
                 }
                 None => {
@@ -373,7 +372,7 @@ impl<'ctx> CodeGen<'ctx> {
         // Create llvm function for all defs and decls
         for i in &func.defs {
             let f = self.funcdef_to_function(&i);
-            self.store_function(i.name.clone(), f);
+            self.store_function(i.header.name.clone(), f);
         }
 
         for i in &func.decls {
@@ -388,7 +387,7 @@ impl<'ctx> CodeGen<'ctx> {
                 TypeDecl::List(_) => self.create_typed_nil(&t, true).into_pointer_value(),
                 _ => self
                     .builder
-                    .build_alloca(t, &format!("{}_{}", func.name, i.name)),
+                    .build_alloca(t, &format!("{}_{}", func.header.name, i.name)),
             };
             self.variable_list.push((i.name.clone(), p));
         }
@@ -399,7 +398,7 @@ impl<'ctx> CodeGen<'ctx> {
         // Cleanup
 
         // Remove the variable pointers for this function
-        for _ in 0..func.arguments.len() {
+        for _ in 0..func.header.arguments.len() {
             self.variable_list.pop();
         }
         for _ in 0..func.vars.len() {
@@ -568,7 +567,7 @@ impl<'ctx> CodeGen<'ctx> {
                 for i in 0..args.len() {
                     let mut is_ref = false;
                     for j in &func.defs {
-                        if &j.name == name && j.arguments[i].is_ref {
+                        if &j.header.name == name && j.header.arguments[i].is_ref {
                             is_ref = true;
                             break;
                         }
