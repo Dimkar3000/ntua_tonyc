@@ -71,7 +71,7 @@ impl<'a> Parser<'a> {
                         match (c0, c1) {
                             (Some(cc0), Some(cc1)) => match (cc0.to_digit(16), cc1.to_digit(16)) {
                                 (Some(n0), Some(n1)) => {
-                                    let code = (n0 * 10 + n1) as u8;
+                                    let code = (n0 * 16 + n1) as u8;
                                     Some(char::from(code))
                                 }
                                 _ => None,
