@@ -260,20 +260,19 @@ impl<'ctx> CodeGen<'ctx> {
         if let Err(e) = self.module.verify() {
             eprintln!("verify error: {}", e);
         }
-        let pass_manager_builder = PassManagerBuilder::create();
-        pass_manager_builder.set_optimization_level(OptimizationLevel::Aggressive);
-        let fpm = PassManager::create(());
-        pass_manager_builder.populate_module_pass_manager(&fpm);
-        fpm.add_argument_promotion_pass();
-        fpm.add_constant_propagation_pass();
-        fpm.add_constant_merge_pass();
-        fpm.add_aggressive_dce_pass();
+        // Create FPM
+        let fpm = PassManager::create(&self.module);
+
         fpm.add_instruction_combining_pass();
+        fpm.add_reassociate_pass();
+        fpm.add_gvn_pass();
         fpm.add_cfg_simplification_pass();
-        fpm.add_strip_dead_prototypes_pass();
-        fpm.add_dead_arg_elimination_pass();
-        fpm.add_tail_call_elimination_pass();
-        assert!(fpm.run_on(&self.module));
+        fpm.add_basic_alias_analysis_pass();
+        fpm.add_promote_memory_to_register_pass();
+        fpm.add_instruction_combining_pass();
+        fpm.add_reassociate_pass();
+
+        fpm.initialize();
         // self.module.print_to_file("test.ll");
         // Build Object file
         Target::initialize_native(&InitializationConfig::default())

@@ -88,7 +88,7 @@ impl<'a> Parser<'a> {
                         self.column,
                         self.line,
                         &format!(
-                            "Failed to Parse escaped sequence: {:?}",
+                            "Failed to Parse escaped sequence: {}",
                             &self.stream[start..=self.index]
                         ),
                     ))
@@ -215,16 +215,21 @@ impl<'a> Parser<'a> {
                     self.column += 1;
                     let mut result = String::new();
                     let mut c = self.read_char();
-                    while c.is_ok() && c.as_ref().unwrap() != &'\"' {
+                    while c.is_ok() {
                         result.push(c.unwrap());
                         c = self.read_char();
+                        if &self.stream[self.index..self.index + 1] == "\"" {
+                            result.push(c.unwrap());
+                            c = self.read_char();
+                            break;
+                        }
                     }
                     self.index -= 1; // Note(dimkar): this reset the index back because there is a global +1 at the end of next token and it will skip the next token
                     self.token = match c {
                         Err(e) => Token::make_error(
                             o_column,
                             self.line,
-                            &format!("Failed to parser String: Underline error: {:?}", e),
+                            &format!("Failed to parser String: Underline error: {}", e),
                         ),
                         Ok('\"') => Token::make_cstring(self.column, self.line, result),
                         Ok(e) => unreachable!("this should never happen {}", e),
@@ -532,7 +537,7 @@ impl<'a> Parser<'a> {
                     self.token = Token::make_error(
                         self.column,
                         self.line,
-                        &format!("Failed to parse character: \"{:?}\"", e),
+                        &format!("Failed to parse character: \"{}\"", e),
                     )
                 }
             }

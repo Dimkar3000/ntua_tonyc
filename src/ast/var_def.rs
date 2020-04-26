@@ -35,27 +35,25 @@ impl VarDef {
         match TypeDecl::generate(parser) {
             Ok(t) => loop {
                 match parser.read_token().get_kind() {
-                    TokenKind::Name => match parser.read_token().extra {
-                        TokenExtra::Name(name) => {
-                            results.push(VarDef::new(&name, t.clone()));
-                            match symbol_table.insert(name, t.clone()) {
-                                Ok(_) => (),
-                                Err(e) => {
-                                    return Err(Error::with_message(
-                                        parser.column,
-                                        parser.line,
-                                        &e,
-                                        "Ast",
-                                    ))
-                                }
+                    TokenKind::Name => {
+                        let name = parser.read_token().get_name().unwrap();
+                        results.push(VarDef::new(&name, t.clone()));
+                        match symbol_table.insert(name, t.clone()) {
+                            Ok(_) => (),
+                            Err(e) => {
+                                return Err(Error::with_message(
+                                    parser.column,
+                                    parser.line,
+                                    &e,
+                                    "Ast",
+                                ))
                             }
-                            if parser.advance_token().get_kind() != TokenKind::Comma {
-                                break;
-                            }
-                            parser.advance_token();
                         }
-                        _ => unreachable!("both kind and extra should be name"),
-                    },
+                        if parser.advance_token().get_kind() != TokenKind::Comma {
+                            break;
+                        }
+                        parser.advance_token();
+                    }
                     e => {
                         return Err(Error::with_message(
                             parser.column,

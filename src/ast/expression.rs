@@ -232,21 +232,18 @@ impl Expr {
                     }
                 }
                 TokenKind::Name => {
-                    if let TokenExtra::Name(n) = parser.read_token().extra {
-                        let t = symbol_table.lookup(n);
-                        if t.is_some() && t.unwrap() == &TypeDecl::Void {
-                            // function that returns void
-                            break;
-                        } else {
-                            if result.is_some() && result.as_ref().unwrap().is_valid() {
-                                break;
-                            }
-                            let atom = Atomic::generate(parser, symbol_table)?;
-
-                            Expr::Atomic(atom.get_type(), atom)
-                        }
+                    let n = parser.read_token().get_name().unwrap();
+                    let t = symbol_table.lookup(n);
+                    if t.is_some() && t.unwrap() == &TypeDecl::Void {
+                        // function that returns void
+                        break;
                     } else {
-                        unreachable!()
+                        if result.is_some() && result.as_ref().unwrap().is_valid() {
+                            break;
+                        }
+                        let atom = Atomic::generate(parser, symbol_table)?;
+
+                        Expr::Atomic(atom.get_type(), atom)
                     }
                 }
                 TokenKind::CString => {
@@ -254,18 +251,12 @@ impl Expr {
                     Expr::Atomic(atom.get_type(), atom)
                 }
                 TokenKind::CChar => {
-                    let c = match token.extra {
-                        TokenExtra::Cchar(c) => Expr::CChar(c),
-                        _ => unreachable!("char"),
-                    };
+                    let c = Expr::CChar(token.get_cchar().unwrap());
                     parser.advance_token();
                     c
                 }
                 TokenKind::INT => {
-                    let n = match token.extra {
-                        TokenExtra::Int(n) => Expr::CInt(n),
-                        _ => unreachable!("int"),
-                    };
+                    let n = Expr::CInt(token.get_int().unwrap());
                     parser.advance_token();
                     n
                 }

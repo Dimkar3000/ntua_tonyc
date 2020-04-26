@@ -188,17 +188,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     let mut ast = AstRoot::new(
         "
     def main():
-        def int fib(int n,p):
+        def int slow_fib(int n,p):
+            puti(n)
+            putc('\\n')
             if n = 0: return 0 
             elif n = 1: return 1 
             end
-            return (fib(n-1,p) mod p + fib(n-2,p) mod p) mod p
+            return (slow_fib(n-1,p) mod p + slow_fib(n-2,p) mod p) mod p
             
         end
         puts(\"result:\\n\")
-        puti(fib(100,1000))
-        
-
+        puti(slow_fib(100,1000))
     end",
     );
 

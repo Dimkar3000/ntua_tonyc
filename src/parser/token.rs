@@ -176,7 +176,7 @@ impl<'a> Token<'a> {
                 line,
                 extra: TokenExtra::None,
             },
-            "elif" => Token {
+            "elsif" => Token {
                 kind: TokenKind::KElseif,
                 column,
                 line,
