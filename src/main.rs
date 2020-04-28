@@ -4,53 +4,6 @@ use libtonyc::codegen::CodeGen;
 use libtonyc::parser::TokenKind;
 use std::error::Error;
 
-pub fn print_expr(expr: Option<Box<Expr>>) -> String {
-    if expr.is_none() {
-        return "none".to_owned();
-    }
-    let expr = *expr.unwrap();
-    let to_symbol = |t| {
-        match t {
-            TokenKind::Addition => "+",
-            TokenKind::Subtraction => "-",
-            TokenKind::Multiplication => "*",
-            TokenKind::Division => "/",
-            TokenKind::KMod => "%",
-            TokenKind::KOr => "||",
-            TokenKind::KAnd => "&&",
-            TokenKind::LessOrEqual => "<=",
-            TokenKind::Less => "<",
-            TokenKind::Equal => "=",
-            TokenKind::NotEqual => "<>",
-            TokenKind::Great => ">",
-            TokenKind::GreatOrEqual => ">=",
-
-            _ => "?",
-        }
-        .to_owned()
-    };
-    match expr {
-        Expr::Atomic(_, _) => format!("atomic"),
-
-        Expr::CChar(c) => format!("{}", c),
-        Expr::CInt(n) => format!("{}", n),
-        Expr::Unary(t, e) => format!("({} {})", to_symbol(t), print_expr(e)),
-        Expr::Binary(t, a, b) => format!("({} {} {})", print_expr(a), to_symbol(t), print_expr(b)),
-        Expr::CBool(b) => format!("{}", b),
-        Expr::Comparison(t, a, b) => {
-            format!("({} {} {})", print_expr(a), to_symbol(t), print_expr(b))
-        }
-        Expr::Logical(t, a, b) => format!("({} {} {})", print_expr(a), to_symbol(t), print_expr(b)),
-        Expr::Negation(a) => format!("(not {})", print_expr(a)),
-        Expr::NilCheck(a) => format!("nil? {}", print_expr(Some(a))),
-        Expr::CNil => format!("nil"),
-        Expr::NewArray(t, a) => format!("new {:?}[{}]", t, print_expr(Some(a))),
-        Expr::Hash(_, a, b) => format!("({}#{})", print_expr(Some(a)), print_expr(Some(b))), // list creation head # tai => format!("{}")l
-        Expr::Head(_, a) => format!("head({})", print_expr(Some(a))),
-        Expr::Tail(_, a) => format!("tail({})", print_expr(Some(a))),
-    }
-}
-
 fn main() -> Result<(), Box<dyn Error>> {
     let context = Context::create();
     let module = context.create_module("main");
@@ -192,7 +145,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             puti(n)
             putc('\\n')
             if n = 0: return 0 
-            elif n = 1: return 1 
+            elsif n = 1: return 1 
             end
             return (slow_fib(n-1,p) mod p + slow_fib(n-2,p) mod p) mod p
             

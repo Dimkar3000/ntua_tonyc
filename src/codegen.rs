@@ -905,7 +905,7 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder
                     .build_bitcast(data.try_as_basic_value().left().unwrap(), t, "cast_gc")
             }
-            Expr::Binary(t, x, y) => {
+            Expr::Binary(t, x, y, true) => {
                 let x = self
                     .compile_exp(x.as_ref().unwrap(), false)
                     .into_int_value();
@@ -938,7 +938,7 @@ impl<'ctx> CodeGen<'ctx> {
                     e => unreachable!("binary operation with token {:?}", e),
                 }
             }
-            Expr::Logical(t, x, y) => {
+            Expr::Logical(t, x, y, true) => {
                 let x = self
                     .compile_exp(x.as_ref().unwrap(), false)
                     .into_int_value();
@@ -953,11 +953,11 @@ impl<'ctx> CodeGen<'ctx> {
                     unreachable!("logical expression with token: {:?}", t)
                 }
             }
-            Expr::Negation(Some(t)) => {
+            Expr::Negation(Some(t), true) => {
                 let r = self.compile_exp(t, false);
                 self.builder.build_not(r.into_int_value(), "not").into()
             }
-            Expr::Comparison(t, x, y) => {
+            Expr::Comparison(t, x, y, true) => {
                 let predicate = match t {
                     TokenKind::Equal => IntPredicate::EQ,
                     TokenKind::NotEqual => IntPredicate::NE,
@@ -984,11 +984,4 @@ impl<'ctx> CodeGen<'ctx> {
             e => panic!("unhandle Expression: {:?}", e),
         }
     }
-
-    // Expression
-    // Note: Expressions return the value calculated for enerything but
-    // Expr::Atomic(_,Atomic::Name(..)) or Expr::Atomic(_,Atomic::Accessor(..))
-    // return the variable pointer if it is the only argument.
-    // ex. print(a) require the value but print(ref a) requires the variable
-    // Stmt is responsible for seperaing the case.
 }

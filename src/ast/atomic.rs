@@ -3,16 +3,44 @@ use crate::ast::TypeDecl;
 use crate::error::Error;
 use crate::parser::{Parser, Token, TokenExtra, TokenKind};
 use crate::symbol_table::SymbolTable;
+use std::fmt::Display;
 
+/// Atomic is an code block that can stand on it's own.
 #[derive(Debug, Clone)]
 pub enum Atomic {
+    /// Variable
     Name(TypeDecl, String),
+    /// Constant String
     CString(String),
+    /// Accessing an array element
     Accessor(Box<Atomic>, Box<Expr>),
+    /// Calling a function
     FuncCall(TypeDecl, String, Vec<Expr>),
 }
 
+impl Display for Atomic {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        match self {
+            Atomic::Name(_, n) => write!(f, "(atom {})", n),
+            Atomic::CString(s) => write!(f, "(atom \"{}\")", s),
+            Atomic::Accessor(a, e) => write!(f, "(atom {}[{}])", a, e),
+            Atomic::FuncCall(_, n, exp) => {
+                write!(f, "(atom {}(", n).unwrap();
+                exp.iter().fold(true, |first, elem| {
+                    if !first {
+                        write!(f, ", ").unwrap();
+                    }
+                    write!(f, "{}", elem).unwrap();
+                    false
+                });
+                write!(f, "))")
+            }
+        }
+    }
+}
+
 impl Atomic {
+    /// Extract the name of atom, used to find function names during code generation
     pub fn get_name(&self) -> String {
         match self {
             Atomic::Name(_, s) => s.clone(),
@@ -21,6 +49,7 @@ impl Atomic {
             Atomic::FuncCall(_, s, _) => s.clone(),
         }
     }
+    /// Get the type of the atom
     pub fn get_type(&self) -> TypeDecl {
         match self {
             Atomic::Name(t, _) => t.clone(),
@@ -36,6 +65,7 @@ impl Atomic {
         }
     }
 
+    /// Generate a new atom by consuming tokens from the parser and checking with the symbol table
     pub fn generate(
         parser: &mut Parser,
         symbol_table: &mut SymbolTable<TypeDecl>,
@@ -77,7 +107,7 @@ impl Atomic {
                                         parser.column,
                                         parser.line,
                                         &format!(
-                                            "Expected RParenthesis or comma, but got {:?}, {:?}",
+                                            "Expected RParenthesis or comma, but got {}, {}",
                                             e,
                                             parser.read_token()
                                         ),
@@ -138,7 +168,7 @@ impl Atomic {
                 parser.advance_token();
                 let b = match Expr::generate(parser, symbol_table, false) {
                     Ok(k) => k,
-                    Err(e) => return Err(e.extend("Ast:Failed to parse bracket content", "Ast")),
+                    Err(e) => return Err(e.extend("Failed to parse bracket content", "Ast")),
                 };
                 match b {
                     Expr::CInt(_) | Expr::Unary(..) | Expr::Binary(..) => (),
@@ -159,10 +189,6 @@ impl Atomic {
                     TokenKind::RBracket => {
                         parser.advance_token();
                         let r = Atomic::Accessor(Box::new(base), Box::new(b));
-                        // match symbol_table.insert(name, r.get_type()) {
-                        //     Ok(()) => (),
-                        //     Err(e) => return Err(Error::with_message(parser.column, parser.line, &e)),
-                        // }
                         Ok(r)
                     }
                     e => Err(Error::with_message(
@@ -173,13 +199,7 @@ impl Atomic {
                     )),
                 }
             }
-            _ => {
-                // match symbol_table.insert(name, base.get_type()) {
-                //     Ok(()) => (),
-                //     Err(e) => return Err(Error::with_message(parser.column, parser.line, &e)),
-                // }
-                Ok(base)
-            }
+            _ => Ok(base),
         }
     }
 }
