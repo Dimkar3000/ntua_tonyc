@@ -7,19 +7,19 @@ use crate::symbol_table::SymbolTable;
 use std::fmt::Display;
 
 /// a basic coding block that represents an expression that return data of any type
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Atomic(TypeDecl, Atomic),
 
     CChar(char),
     CInt(i16),
-    Unary(TokenKind, Option<Box<Expr>>, bool),
-    Binary(TokenKind, Option<Box<Expr>>, Option<Box<Expr>>, bool),
+    Unary(TokenKind, Option<Box<Expr>>),
+    Binary(TokenKind, Option<Box<Expr>>, Option<Box<Expr>>),
 
     CBool(bool),
-    Comparison(TokenKind, Option<Box<Expr>>, Option<Box<Expr>>, bool),
-    Logical(TokenKind, Option<Box<Expr>>, Option<Box<Expr>>, bool),
-    Negation(Option<Box<Expr>>, bool),
+    Comparison(TokenKind, Option<Box<Expr>>, Option<Box<Expr>>),
+    Logical(TokenKind, Option<Box<Expr>>, Option<Box<Expr>>),
+    Negation(Option<Box<Expr>>),
     NilCheck(Box<Expr>),
 
     CNil, // expty list of any type
@@ -54,12 +54,12 @@ impl Display for Expr {
             Expr::Atomic(_, _) => write!(f, "atomic"),
             Expr::CChar(c) => write!(f, "{}", c),
             Expr::CInt(n) => write!(f, "{}", n),
-            Expr::Unary(t, Some(e), _) => write!(f, "{} {}", to_symbol(t), e),
-            Expr::Binary(t, Some(a), Some(b), _) => write!(f, "{} {} {}", a, to_symbol(t), b),
+            Expr::Unary(t, Some(e)) => write!(f, "{} {}", to_symbol(t), e),
+            Expr::Binary(t, Some(a), Some(b)) => write!(f, "{} {} {}", a, to_symbol(t), b),
             Expr::CBool(b) => write!(f, "{}", b),
-            Expr::Comparison(t, Some(a), Some(b), _) => write!(f, "({} {} {})", a, to_symbol(t), b),
-            Expr::Logical(t, Some(a), Some(b), _) => write!(f, "({} {} {})", a, to_symbol(t), b),
-            Expr::Negation(Some(a), _) => write!(f, "(not {})", a),
+            Expr::Comparison(t, Some(a), Some(b)) => write!(f, "({} {} {})", a, to_symbol(t), b),
+            Expr::Logical(t, Some(a), Some(b)) => write!(f, "({} {} {})", a, to_symbol(t), b),
+            Expr::Negation(Some(a)) => write!(f, "(not {})", a),
             Expr::NilCheck(a) => write!(f, "nil? {}", a),
             Expr::CNil => write!(f, "nil"),
             Expr::NewArray(t, a) => write!(f, "new {:?}[{}]", t, a),
@@ -83,11 +83,26 @@ impl Expr {
             Expr::CInt(_) => true,
             Expr::CChar(_) => true,
             Expr::CBool(_) => true,
-            Expr::Unary(_, _, b) => *b,
-            Expr::Binary(_, _, _, b) => *b,
-            Expr::Logical(_, _, _, b) => *b,
-            Expr::Negation(_, b) => *b,
-            Expr::Comparison(_, _, _, b) => *b,
+            Expr::Unary(_, b) => b.is_some() && b.as_ref().unwrap().is_valid(),
+            Expr::Binary(_, a, b) => {
+                a.is_some()
+                    && a.as_ref().unwrap().is_valid()
+                    && b.is_some()
+                    && b.as_ref().unwrap().is_valid()
+            }
+            Expr::Logical(_, a, b) => {
+                a.is_some()
+                    && a.as_ref().unwrap().is_valid()
+                    && b.is_some()
+                    && b.as_ref().unwrap().is_valid()
+            }
+            Expr::Negation(b) => b.is_some() && b.as_ref().unwrap().is_valid(),
+            Expr::Comparison(_, a, b) => {
+                a.is_some()
+                    && a.as_ref().unwrap().is_valid()
+                    && b.is_some()
+                    && b.as_ref().unwrap().is_valid()
+            }
             Expr::NilCheck(a) => a.is_valid(),
             Expr::CNil => true,
             Expr::NewArray(_, s) => s.is_valid(),
@@ -139,117 +154,98 @@ impl Expr {
         // All the cases possible some more
         match ((*left).clone(), right) {
             // Bool is valid on the left only when followed by a comparison operator
-            (Expr::Unary(t, None, _), a) if a.get_type() == TypeDecl::Int => {
-                Ok(Expr::Unary(t, Some(a.bx()), true))
-            }
-            (a, Expr::Binary(t, None, None, _)) if a.get_type() == TypeDecl::Int => {
-                Ok(Expr::Binary(t, Some(a.bx()), None, false))
-            }
-            (Expr::Binary(t, Some(a), b, _), Expr::Unary(t0, c, b0)) => {
-                match Expr::match_expr(b, Expr::Unary(t0, c, b0)) {
-                    Ok(k) => {
-                        let b = k.is_valid();
-                        Ok(Expr::Binary(t, Some(a), Some(k.bx()), b))
-                    }
-                    Err(_) => Err(*left),
-                }
-            }
-            (Expr::Binary(t0, Some(a), None, _), b) if b.get_type() == TypeDecl::Int => {
-                Ok(Expr::Binary(t0, Some(a), Some(b.bx()), true))
-            }
-
-            (Expr::Binary(t0, Some(a), b, _), Expr::Binary(t, c, d, b0)) if low(t0) && high(t) => {
-                match Expr::match_expr(b, Expr::Binary(t, c, d, b0)) {
-                    Ok(k) => {
-                        let b = k.is_valid();
-                        Ok(Expr::Binary(t0, Some(a), Some(k.bx()), b))
-                    }
-                    Err(_) => Err(*left),
-                }
-            }
-
-            (Expr::Binary(t, Some(a), b, _), Expr::CInt(n)) => {
-                match Expr::match_expr(b, Expr::CInt(n)) {
-                    Ok(k) => {
-                        let b = k.is_valid();
-                        Ok(Expr::Binary(t, Some(a), Some(k.bx()), b))
-                    }
-                    Err(_) => Err(*left),
-                }
-            }
-            (Expr::Binary(t0, Some(a), Some(b), b0), Expr::Binary(t, None, None, _)) => {
-                Ok(Expr::Binary(
-                    t,
-                    Some(Expr::Binary(t0, Some(a), Some(b), b0).bx()),
-                    None,
-                    false,
-                ))
-            }
-
-            (Expr::Negation(a, _), b) if !is_logical(b.clone()) => match Expr::match_expr(a, b) {
-                Ok(k) => {
-                    let b = k.is_valid();
-                    Ok(Expr::Negation(Some(k.bx()), b))
-                }
-                Err(_) => Err(*left),
-            },
             (
-                Expr::Logical(TokenKind::KOr, a, b, _),
-                Expr::Logical(TokenKind::KAnd, None, None, b0),
-            ) => match Expr::match_expr(b, Expr::Logical(TokenKind::KAnd, None, None, b0)) {
-                Ok(k) => {
-                    let b = k.is_valid();
-                    Ok(Expr::Logical(TokenKind::KOr, a, Some(k.bx()), b))
-                }
-                Err(_) => Err(*left),
-            },
-            (a, Expr::Logical(t, None, None, _)) if a.get_type() == TypeDecl::Bool => {
-                Ok(Expr::Logical(t, Some(a.bx()), None, false))
-            }
-            (Expr::Logical(t, Some(a), None, _), Expr::Negation(None, false)) => Ok(Expr::Logical(
+                Expr::Comparison(t, Some(a), None),
+                Expr::Binary(TokenKind::Subtraction, None, None),
+            ) => Ok(Expr::Comparison(
                 t,
                 Some(a),
-                Some(Expr::Negation(None, false).bx()),
-                false,
+                Some(Expr::Unary(TokenKind::Subtraction, None).bx()),
             )),
-            (Expr::Logical(t, Some(a), b, _), c) => match Expr::match_expr(b, c) {
-                Ok(k) => {
-                    let b = k.is_valid();
-                    Ok(Expr::Logical(t, Some(a), Some(k.bx()), b))
+            (Expr::Logical(t, Some(a), None), Expr::Binary(TokenKind::Subtraction, None, None)) => {
+                Ok(Expr::Logical(
+                    t,
+                    Some(a),
+                    Some(Expr::Unary(TokenKind::Subtraction, None).bx()),
+                ))
+            }
+            (Expr::Unary(t, None), a) if a.get_type() == TypeDecl::Int => {
+                Ok(Expr::Unary(t, Some(a.bx())))
+            }
+            (a, Expr::Binary(t, None, None)) if a.get_type() == TypeDecl::Int => {
+                Ok(Expr::Binary(t, Some(a.bx()), None))
+            }
+            (Expr::Binary(t, Some(a), b), Expr::Unary(t0, c)) => {
+                match Expr::match_expr(b, Expr::Unary(t0, c)) {
+                    Ok(k) => Ok(Expr::Binary(t, Some(a), Some(k.bx()))),
+                    Err(_) => Err(*left),
                 }
+            }
+            (Expr::Binary(t0, Some(a), None), b) if b.get_type() == TypeDecl::Int => {
+                Ok(Expr::Binary(t0, Some(a), Some(b.bx())))
+            }
+
+            (Expr::Binary(t0, Some(a), b), Expr::Binary(t, c, d)) if low(t0) && high(t) => {
+                match Expr::match_expr(b, Expr::Binary(t, c, d)) {
+                    Ok(k) => Ok(Expr::Binary(t0, Some(a), Some(k.bx()))),
+                    Err(_) => Err(*left),
+                }
+            }
+
+            (Expr::Binary(t, Some(a), b), Expr::CInt(n)) => {
+                match Expr::match_expr(b, Expr::CInt(n)) {
+                    Ok(k) => Ok(Expr::Binary(t, Some(a), Some(k.bx()))),
+                    Err(_) => Err(*left),
+                }
+            }
+            (Expr::Binary(t0, Some(a), Some(b)), Expr::Binary(t, None, None)) => Ok(Expr::Binary(
+                t,
+                Some(Expr::Binary(t0, Some(a), Some(b)).bx()),
+                None,
+            )),
+
+            (Expr::Negation(a), b) if !is_logical(b.clone()) => match Expr::match_expr(a, b) {
+                Ok(k) => Ok(Expr::Negation(Some(k.bx()))),
                 Err(_) => Err(*left),
             },
-
-            (e, Expr::Comparison(t, None, None, false)) => {
-                Ok(Expr::Comparison(t, Some(e.bx()), None, false))
-            }
-            (Expr::Comparison(t, Some(a), None, _), e) if a.get_type() == e.get_type() => {
-                Ok(Expr::Comparison(t, Some(a), Some(e.bx()), true))
-            }
-            (Expr::Comparison(t, Some(a), b, _), Expr::Binary(t0, c, d, b0)) => {
-                match Expr::match_expr(b, Expr::Binary(t0, c, d, b0)) {
-                    Ok(k) => {
-                        let b = k.is_valid();
-                        Ok(Expr::Comparison(t, Some(a), Some(k.bx()), b))
-                    }
+            (Expr::Logical(TokenKind::KOr, a, b), Expr::Logical(TokenKind::KAnd, None, None)) => {
+                match Expr::match_expr(b, Expr::Logical(TokenKind::KAnd, None, None)) {
+                    Ok(k) => Ok(Expr::Logical(TokenKind::KOr, a, Some(k.bx()))),
                     Err(_) => Err(*left),
                 }
             }
-            (Expr::Comparison(t, Some(a), b, _), Expr::Unary(t0, c, b1)) => {
-                match Expr::match_expr(b, Expr::Unary(t0, c, b1)) {
-                    Ok(k) => {
-                        let b = k.is_valid();
-                        Ok(Expr::Comparison(t, Some(a), Some(k.bx()), b))
-                    }
+            (a, Expr::Logical(t, None, None)) if a.get_type() == TypeDecl::Bool => {
+                Ok(Expr::Logical(t, Some(a.bx()), None))
+            }
+            (Expr::Logical(t, Some(a), None), Expr::Negation(None)) => {
+                Ok(Expr::Logical(t, Some(a), Some(Expr::Negation(None).bx())))
+            }
+            (Expr::Logical(t, Some(a), Some(b)), Expr::Comparison(t0, None, None)) => Ok(
+                Expr::Logical(t, Some(a), Some(Expr::Comparison(t0, Some(b), None).bx())),
+            ),
+            (Expr::Logical(t, Some(a), b), c) => match Expr::match_expr(b, c) {
+                Ok(k) => Ok(Expr::Logical(t, Some(a), Some(k.bx()))),
+                Err(_) => Err(*left),
+            },
+            (e, Expr::Comparison(t, None, None)) => Ok(Expr::Comparison(t, Some(e.bx()), None)),
+            (Expr::Comparison(t, Some(a), None), e) if a.get_type() == e.get_type() => {
+                Ok(Expr::Comparison(t, Some(a), Some(e.bx())))
+            }
+            (Expr::Comparison(t, Some(a), b), Expr::Binary(t0, c, d)) => {
+                match Expr::match_expr(b, Expr::Binary(t0, c, d)) {
+                    Ok(k) => Ok(Expr::Comparison(t, Some(a), Some(k.bx()))),
                     Err(_) => Err(*left),
                 }
             }
-            (Expr::Comparison(t, Some(a), b, _), Expr::CInt(n)) => {
+            (Expr::Comparison(t, Some(a), b), Expr::Unary(t0, c)) => {
+                match Expr::match_expr(b, Expr::Unary(t0, c)) {
+                    Ok(k) => Ok(Expr::Comparison(t, Some(a), Some(k.bx()))),
+                    Err(_) => Err(*left),
+                }
+            }
+            (Expr::Comparison(t, Some(a), b), Expr::CInt(n)) => {
                 match Expr::match_expr(b, Expr::CInt(n)) {
-                    Ok(k) => {
-                        let b = k.is_valid();
-                        Ok(Expr::Comparison(t, Some(a), Some(k.bx()), b))
-                    }
+                    Ok(k) => Ok(Expr::Comparison(t, Some(a), Some(k.bx()))),
                     Err(_) => Err(*left),
                 }
             }
@@ -258,15 +254,15 @@ impl Expr {
     }
     fn reduce(expr: Expr) -> Expr {
         match expr {
-            Expr::Unary(t, Some(e), true) => {
+            Expr::Unary(t, Some(e)) => {
                 let l = Expr::reduce(*e);
                 match (t, &l) {
                     (TokenKind::Addition, &Expr::CInt(n)) => Expr::CInt(n),
                     (TokenKind::Subtraction, &Expr::CInt(n)) => Expr::CInt(-n),
-                    _ => Expr::Unary(t, Some(l.bx()), true),
+                    _ => Expr::Unary(t, Some(l.bx())),
                 }
             }
-            Expr::Binary(t, Some(a), Some(b), true) => {
+            Expr::Binary(t, Some(a), Some(b)) => {
                 let x = Expr::reduce(*a);
                 let y = Expr::reduce(*b);
                 match (&t, &x, &y) {
@@ -285,17 +281,17 @@ impl Expr {
                     (TokenKind::KMod, &Expr::CInt(f), &Expr::CInt(s)) => {
                         Expr::CInt(f.wrapping_rem(s))
                     }
-                    _ => Expr::Binary(t, Some(x.bx()), Some(y.bx()), true),
+                    _ => Expr::Binary(t, Some(x.bx()), Some(y.bx())),
                 }
             }
-            Expr::Negation(Some(a), true) => {
+            Expr::Negation(Some(a)) => {
                 let x = Expr::reduce(*a);
                 match &x {
                     Expr::CBool(t) => Expr::CBool(!t),
-                    _ => Expr::Negation(Some(x.bx()), true),
+                    _ => Expr::Negation(Some(x.bx())),
                 }
             }
-            Expr::Comparison(t, Some(a), Some(b), true) => {
+            Expr::Comparison(t, Some(a), Some(b)) => {
                 let x = Expr::reduce(*a);
                 let y = Expr::reduce(*b);
                 match (&t, &x, &y) {
@@ -330,16 +326,16 @@ impl Expr {
                         Expr::CBool(f >= s)
                     }
 
-                    _ => Expr::Comparison(t, Some(x.bx()), Some(y.bx()), true),
+                    _ => Expr::Comparison(t, Some(x.bx()), Some(y.bx())),
                 }
             }
-            Expr::Logical(t, Some(a), Some(b), true) => {
+            Expr::Logical(t, Some(a), Some(b)) => {
                 let x = Expr::reduce(*a);
                 let y = Expr::reduce(*b);
                 match (&t, &x, &y) {
                     (TokenKind::KAnd, &Expr::CBool(f), &Expr::CBool(s)) => Expr::CBool(f && s),
                     (TokenKind::KOr, &Expr::CBool(f), &Expr::CBool(s)) => Expr::CBool(f || s),
-                    _ => Expr::Comparison(t, Some(x.bx()), Some(y.bx()), true),
+                    _ => Expr::Comparison(t, Some(x.bx()), Some(y.bx())),
                 }
             }
 
@@ -357,7 +353,6 @@ impl Expr {
         let mut result: Option<Box<Expr>> = None;
         // let current_error;
         loop {
-            // println!("token: {:?}",parser.read_token());
             let token = parser.read_token();
             let right = match token.get_kind() {
                 TokenKind::KTrue => {
@@ -372,9 +367,9 @@ impl Expr {
                     let token = parser.read_token().get_kind();
                     parser.advance_token();
                     if result.is_none() {
-                        Expr::Unary(token, None, false)
+                        Expr::Unary(token, None)
                     } else {
-                        Expr::Binary(token, None, None, false)
+                        Expr::Binary(token, None, None)
                     }
                 }
                 TokenKind::Name => {
@@ -409,12 +404,12 @@ impl Expr {
                 TokenKind::Multiplication | TokenKind::Division | TokenKind::KMod => {
                     let kind = token.get_kind();
                     parser.advance_token();
-                    Expr::Binary(kind, None, None, false)
+                    Expr::Binary(kind, None, None)
                 }
                 TokenKind::KAnd | TokenKind::KOr => {
                     let kind = token.get_kind();
                     parser.advance_token();
-                    Expr::Logical(kind, None, None, false)
+                    Expr::Logical(kind, None, None)
                 }
                 TokenKind::Equal
                 | TokenKind::NotEqual
@@ -424,11 +419,11 @@ impl Expr {
                 | TokenKind::GreatOrEqual => {
                     let kind = token.get_kind();
                     parser.advance_token();
-                    Expr::Comparison(kind, None, None, false)
+                    Expr::Comparison(kind, None, None)
                 }
                 TokenKind::KNot => {
                     parser.advance_token();
-                    Expr::Negation(None, false)
+                    Expr::Negation(None)
                 }
                 TokenKind::LParenthesis => {
                     parser.advance_token();
@@ -474,7 +469,7 @@ impl Expr {
                         ));
                     }
                     let r = result.unwrap();
-                    if !r.is_valid() {
+                    if !r.is_valid() || !is_paranthesis {
                         return Err(Error::with_message(
                             parser.column,
                             parser.line,
@@ -483,7 +478,8 @@ impl Expr {
                         ));
                     }
                     parser.advance_token();
-                    return Ok(*r);
+                    let a = Expr::reduce(*r);
+                    return Ok(a);
                 }
                 TokenKind::Empty => {
                     if result.is_some() {
@@ -693,6 +689,7 @@ impl Expr {
                 }
                 _ => break,
             };
+
             match Expr::match_expr(result, right) {
                 Ok(k) => {
                     result = Some(k.bx());
@@ -704,7 +701,6 @@ impl Expr {
                 }
             }
         }
-        println!("happen");
         if result.is_some() {
             let r = result.unwrap();
             if r.is_valid() {

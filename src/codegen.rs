@@ -905,7 +905,7 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder
                     .build_bitcast(data.try_as_basic_value().left().unwrap(), t, "cast_gc")
             }
-            Expr::Binary(t, x, y, true) => {
+            Expr::Binary(t, x, y) => {
                 let x = self
                     .compile_exp(x.as_ref().unwrap(), false)
                     .into_int_value();
@@ -938,7 +938,7 @@ impl<'ctx> CodeGen<'ctx> {
                     e => unreachable!("binary operation with token {:?}", e),
                 }
             }
-            Expr::Logical(t, x, y, true) => {
+            Expr::Logical(t, x, y) => {
                 let x = self
                     .compile_exp(x.as_ref().unwrap(), false)
                     .into_int_value();
@@ -953,11 +953,11 @@ impl<'ctx> CodeGen<'ctx> {
                     unreachable!("logical expression with token: {:?}", t)
                 }
             }
-            Expr::Negation(Some(t), true) => {
+            Expr::Negation(Some(t)) => {
                 let r = self.compile_exp(t, false);
                 self.builder.build_not(r.into_int_value(), "not").into()
             }
-            Expr::Comparison(t, x, y, true) => {
+            Expr::Comparison(t, x, y) => {
                 let predicate = match t {
                     TokenKind::Equal => IntPredicate::EQ,
                     TokenKind::NotEqual => IntPredicate::NE,

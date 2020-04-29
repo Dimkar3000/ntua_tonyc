@@ -18,6 +18,12 @@ pub enum Atomic {
     FuncCall(TypeDecl, String, Vec<Expr>),
 }
 
+impl PartialEq for Atomic {
+    fn eq(&self, _: &Atomic) -> bool {
+        false
+    }
+}
+
 impl Display for Atomic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         match self {
