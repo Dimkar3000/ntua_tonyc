@@ -1,7 +1,7 @@
 use inkwell::context::Context;
 use libtonyc::ast::*;
 use libtonyc::codegen::CodeGen;
-use libtonyc::parser::TokenKind;
+// use libtonyc::parser::TokenKind;
 use std::error::Error;
 
 fn main() -> Result<(), Box<dyn Error>> {

@@ -10,7 +10,6 @@ fn test_words() {
     );
     assert_eq!(TokenKind::CString, parser.advance_token().kind);
     assert_eq!("abc", parser.read_token().get_cstring().unwrap());
-    println!("abc");
     assert_eq!(TokenKind::CString, parser.advance_token().kind);
     assert_eq!("Route66", parser.read_token().get_cstring().unwrap());
     assert_eq!(TokenKind::CString, parser.advance_token().kind);

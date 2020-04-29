@@ -12,13 +12,11 @@ pub enum Expr {
     Atomic(TypeDecl, Atomic),
 
     CChar(char),
-    // Parenthesis(TypeDecl, Box<Expr>),
     CInt(i16),
     Unary(TokenKind, Option<Box<Expr>>, bool),
     Binary(TokenKind, Option<Box<Expr>>, Option<Box<Expr>>, bool),
 
     CBool(bool),
-    // Unary(TokenKind::Subtraction,Option<Box<Expr>>),
     Comparison(TokenKind, Option<Box<Expr>>, Option<Box<Expr>>, bool),
     Logical(TokenKind, Option<Box<Expr>>, Option<Box<Expr>>, bool),
     Negation(Option<Box<Expr>>, bool),
@@ -56,8 +54,8 @@ impl Display for Expr {
             Expr::Atomic(_, _) => write!(f, "atomic"),
             Expr::CChar(c) => write!(f, "{}", c),
             Expr::CInt(n) => write!(f, "{}", n),
-            Expr::Unary(t, Some(e), _) => write!(f, "({} {})", to_symbol(t), e),
-            Expr::Binary(t, Some(a), Some(b), _) => write!(f, "({} {} {})", a, to_symbol(t), b),
+            Expr::Unary(t, Some(e), _) => write!(f, "{} {}", to_symbol(t), e),
+            Expr::Binary(t, Some(a), Some(b), _) => write!(f, "{} {} {}", a, to_symbol(t), b),
             Expr::CBool(b) => write!(f, "{}", b),
             Expr::Comparison(t, Some(a), Some(b), _) => write!(f, "({} {} {})", a, to_symbol(t), b),
             Expr::Logical(t, Some(a), Some(b), _) => write!(f, "({} {} {})", a, to_symbol(t), b),
@@ -119,7 +117,11 @@ impl Expr {
         }
     }
 
-    fn match_expr(left: Option<Box<Expr>>, right: Expr) -> Result<Expr, Expr> {
+    /// Generic Expression trie matching
+    ///
+    /// this function takes 2 expressions and tries to apply the rgiht expression to the left.
+    /// In case of failure it returns the left Expression
+    pub fn match_expr(left: Option<Box<Expr>>, right: Expr) -> Result<Expr, Expr> {
         if left.is_none() {
             return Ok(right);
         }
@@ -134,6 +136,7 @@ impl Expr {
             Expr::Logical(..) => true,
             _ => false,
         };
+        // All the cases possible some more
         match ((*left).clone(), right) {
             // Bool is valid on the left only when followed by a comparison operator
             (Expr::Unary(t, None, _), a) if a.get_type() == TypeDecl::Int => {
@@ -253,6 +256,99 @@ impl Expr {
             _ => Err(*left),
         }
     }
+    fn reduce(expr: Expr) -> Expr {
+        match expr {
+            Expr::Unary(t, Some(e), true) => {
+                let l = Expr::reduce(*e);
+                match (t, &l) {
+                    (TokenKind::Addition, &Expr::CInt(n)) => Expr::CInt(n),
+                    (TokenKind::Subtraction, &Expr::CInt(n)) => Expr::CInt(-n),
+                    _ => Expr::Unary(t, Some(l.bx()), true),
+                }
+            }
+            Expr::Binary(t, Some(a), Some(b), true) => {
+                let x = Expr::reduce(*a);
+                let y = Expr::reduce(*b);
+                match (&t, &x, &y) {
+                    (TokenKind::Addition, &Expr::CInt(f), &Expr::CInt(s)) => {
+                        Expr::CInt(f.wrapping_add(s))
+                    }
+                    (TokenKind::Subtraction, &Expr::CInt(f), &Expr::CInt(s)) => {
+                        Expr::CInt(f.wrapping_sub(s))
+                    }
+                    (TokenKind::Multiplication, &Expr::CInt(f), &Expr::CInt(s)) => {
+                        Expr::CInt(f.wrapping_mul(s))
+                    }
+                    (TokenKind::Division, &Expr::CInt(f), &Expr::CInt(s)) => {
+                        Expr::CInt(f.wrapping_div(s))
+                    }
+                    (TokenKind::KMod, &Expr::CInt(f), &Expr::CInt(s)) => {
+                        Expr::CInt(f.wrapping_rem(s))
+                    }
+                    _ => Expr::Binary(t, Some(x.bx()), Some(y.bx()), true),
+                }
+            }
+            Expr::Negation(Some(a), true) => {
+                let x = Expr::reduce(*a);
+                match &x {
+                    Expr::CBool(t) => Expr::CBool(!t),
+                    _ => Expr::Negation(Some(x.bx()), true),
+                }
+            }
+            Expr::Comparison(t, Some(a), Some(b), true) => {
+                let x = Expr::reduce(*a);
+                let y = Expr::reduce(*b);
+                match (&t, &x, &y) {
+                    (TokenKind::Less, &Expr::CBool(f), &Expr::CBool(s)) => Expr::CBool(f < s),
+                    (TokenKind::LessOrEqual, &Expr::CBool(f), &Expr::CBool(s)) => {
+                        Expr::CBool(f <= s)
+                    }
+                    (TokenKind::Equal, &Expr::CBool(f), &Expr::CBool(s)) => Expr::CBool(f == s),
+                    (TokenKind::NotEqual, &Expr::CBool(f), &Expr::CBool(s)) => Expr::CBool(f != s),
+                    (TokenKind::Great, &Expr::CBool(f), &Expr::CBool(s)) => Expr::CBool(f > s),
+                    (TokenKind::GreatOrEqual, &Expr::CBool(f), &Expr::CBool(s)) => {
+                        Expr::CBool(f >= s)
+                    }
+
+                    (TokenKind::Less, &Expr::CInt(f), &Expr::CInt(s)) => Expr::CBool(f < s),
+                    (TokenKind::LessOrEqual, &Expr::CInt(f), &Expr::CInt(s)) => Expr::CBool(f <= s),
+                    (TokenKind::Equal, &Expr::CInt(f), &Expr::CInt(s)) => Expr::CBool(f == s),
+                    (TokenKind::NotEqual, &Expr::CInt(f), &Expr::CInt(s)) => Expr::CBool(f != s),
+                    (TokenKind::Great, &Expr::CInt(f), &Expr::CInt(s)) => Expr::CBool(f > s),
+                    (TokenKind::GreatOrEqual, &Expr::CInt(f), &Expr::CInt(s)) => {
+                        Expr::CBool(f >= s)
+                    }
+
+                    (TokenKind::Less, &Expr::CChar(f), &Expr::CChar(s)) => Expr::CBool(f < s),
+                    (TokenKind::LessOrEqual, &Expr::CChar(f), &Expr::CChar(s)) => {
+                        Expr::CBool(f <= s)
+                    }
+                    (TokenKind::Equal, &Expr::CChar(f), &Expr::CChar(s)) => Expr::CBool(f == s),
+                    (TokenKind::NotEqual, &Expr::CChar(f), &Expr::CChar(s)) => Expr::CBool(f != s),
+                    (TokenKind::Great, &Expr::CChar(f), &Expr::CChar(s)) => Expr::CBool(f > s),
+                    (TokenKind::GreatOrEqual, &Expr::CChar(f), &Expr::CChar(s)) => {
+                        Expr::CBool(f >= s)
+                    }
+
+                    _ => Expr::Comparison(t, Some(x.bx()), Some(y.bx()), true),
+                }
+            }
+            Expr::Logical(t, Some(a), Some(b), true) => {
+                let x = Expr::reduce(*a);
+                let y = Expr::reduce(*b);
+                match (&t, &x, &y) {
+                    (TokenKind::KAnd, &Expr::CBool(f), &Expr::CBool(s)) => Expr::CBool(f && s),
+                    (TokenKind::KOr, &Expr::CBool(f), &Expr::CBool(s)) => Expr::CBool(f || s),
+                    _ => Expr::Comparison(t, Some(x.bx()), Some(y.bx()), true),
+                }
+            }
+
+            // Incase the expression is not reducable the just return it
+            e => e,
+        }
+    }
+
+    /// Generate a new Expression from a parser and a symbol_table
     pub fn generate(
         parser: &mut Parser,
         symbol_table: &mut SymbolTable<TypeDecl>,
@@ -393,7 +489,8 @@ impl Expr {
                     if result.is_some() {
                         let r = result.unwrap();
                         if r.is_valid() {
-                            return Ok(*r);
+                            let a = Expr::reduce(*r);
+                            return Ok(a);
                         } else {
                             return Err(Error::with_message(
                                 parser.column,
@@ -607,10 +704,12 @@ impl Expr {
                 }
             }
         }
+        println!("happen");
         if result.is_some() {
             let r = result.unwrap();
             if r.is_valid() {
-                Ok(*r)
+                let a = Expr::reduce(*r);
+                Ok(a)
             } else {
                 Err(Error::with_message(
                     parser.column,
