@@ -1,7 +1,14 @@
+*
+!*/
+!*.*
+
 /target
 /llvm
-**.exe
 .idea
-lld*.exe
 .vs
-test.ll
+gcmt*
+
+**/*.asm
+**/*.imm
+**/*.o
+**/*.exe

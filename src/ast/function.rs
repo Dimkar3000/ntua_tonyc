@@ -2,6 +2,7 @@ use crate::ast::{Stmt, TypeDecl, VarDef};
 use crate::error::Error;
 use crate::parser::*;
 use crate::symbol_table::SymbolTable;
+use std::fmt::Display;
 
 #[derive(Debug, Clone)]
 pub struct FormalDecl {
@@ -24,6 +25,35 @@ pub struct FuncDef {
     pub defs: Vec<FuncDef>,
     pub vars: Vec<VarDef>,
     pub stmts: Vec<Stmt>,
+}
+
+impl Display for FuncDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        write!(f, "decl {}", self.name)
+    }
+}
+
+impl Display for FuncDef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        writeln!(f, "def {}:", self.header.name).unwrap();
+        for i in &self.decls {
+            writeln!(f, "\t\t{}", i).unwrap();
+        }
+        writeln!(f, "\tdefs:").unwrap();
+        for i in &self.defs {
+            writeln!(f, "\t\t{}", i).unwrap();
+        }
+        writeln!(f, "\tdefs:").unwrap();
+        for i in &self.vars {
+            writeln!(f, "\t\t{}", i).unwrap();
+        }
+        writeln!(f, "\tdefs:").unwrap();
+        for i in &self.stmts {
+            writeln!(f, "\t\t{}", i).unwrap();
+        }
+
+        write!(f, "end")
+    }
 }
 
 impl FuncDecl {
@@ -143,7 +173,8 @@ impl FuncDef {
                         ))
                     }
                 };
-                symbol_table.insert(&name, t.clone()).unwrap();
+                // println!("{:?}", symbol_table);
+                let _ = symbol_table.insert(&name, t.clone());
                 symbol_table.open_scope(&name);
                 if parser.read_token().get_kind() != TokenKind::LParenthesis {
                     return Err(Error::with_message(
@@ -199,30 +230,11 @@ impl FuncDef {
                         _ => break,
                     }
                 }
-                // parser.get_token();
                 while parser.read_token().get_kind() != TokenKind::KEnd {
                     stmts.push(Stmt::generate(parser, symbol_table)?);
                 }
                 parser.advance_token();
-                // parser.get_token();
-                // current_block_name = old_name;
                 symbol_table.close_scope();
-                // let a = match t.clone() {
-                //     Some(i) => symbol_table.insert(&name, i),
-                //     None => symbol_table.insert(&name, TypeDecl::Void),
-                // };
-
-                // match a {
-                //     Ok(()) => (),
-                //     Err(e) => {
-                //         return Err(Error::with_message(
-                //             parser.column,
-                //             parser.line,
-
-                //             &format!("Ast Def: {}",e),
-                //         ))
-                //     }
-                // }
                 Ok(FuncDef {
                     header: FuncDecl {
                         rtype: t,

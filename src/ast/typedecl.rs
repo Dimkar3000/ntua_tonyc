@@ -1,5 +1,6 @@
 use crate::error::Error;
 use crate::parser::*;
+use std::fmt::Display;
 /// Typedecl is the type of a single block of code.
 #[derive(Debug, Clone)]
 pub enum TypeDecl {
@@ -17,6 +18,20 @@ pub enum TypeDecl {
     Array(Box<TypeDecl>),
     /// linked list data. Leaves on the head and the type of the data is the sub-type
     List(Box<TypeDecl>),
+}
+
+impl Display for TypeDecl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        match self {
+            TypeDecl::Int => write!(f, "int"),
+            TypeDecl::Void => write!(f, "void"),
+            TypeDecl::Nil => write!(f, "nil"),
+            TypeDecl::Char => write!(f, "char"),
+            TypeDecl::Bool => write!(f, "bool"),
+            TypeDecl::Array(t) => write!(f, "array[{}]", t),
+            TypeDecl::List(t) => write!(f, "list[{}]", t),
+        }
+    }
 }
 
 /// PartialEq for Typedecl cannot be derived because the nill type match any list type and void doen't match anytning but void.

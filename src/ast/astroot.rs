@@ -43,15 +43,6 @@ impl<'a> AstRoot<'a> {
         result
     }
 
-    pub fn error<T, S: AsRef<str>>(&self, message: S) -> Result<T, Error> {
-        Err(Error::with_message(
-            self.parser.column,
-            self.parser.line,
-            message.as_ref(),
-            "Ast",
-        ))
-    }
-
     pub fn generate(&mut self) -> Result<FuncDef, Error> {
         self.parser.advance_token();
         FuncDef::generate(&mut self.parser, &mut self.symbol_table)

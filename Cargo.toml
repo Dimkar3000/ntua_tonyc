@@ -11,6 +11,7 @@ path = "src/lib.rs"
 [dependencies]
 inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "llvm10-0" }
 colored = "1.9.3"
+clap = { git = "https://github.com/clap-rs/clap/" }
 
 [[bin]]
 name = "tonyc"

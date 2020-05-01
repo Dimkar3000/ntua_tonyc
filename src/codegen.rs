@@ -240,7 +240,14 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
-    pub fn compile<'a>(&mut self, ast: &'a mut AstRoot<'a>) -> Result<(), String> {
+    pub fn compile<'a>(
+        &mut self,
+        ast: &'a mut AstRoot<'a>,
+        output_intermidiate: bool,
+        output_final: bool,
+        optimize: bool,
+        filename: &Path,
+    ) -> Result<(), String> {
         // Build Ast
         let main = ast.generate();
         if main.is_err() {
@@ -263,47 +270,81 @@ impl<'ctx> CodeGen<'ctx> {
         // Create FPM
         let fpm = PassManager::create(&self.module);
 
-        fpm.add_instruction_combining_pass();
-        fpm.add_reassociate_pass();
-        fpm.add_gvn_pass();
-        fpm.add_cfg_simplification_pass();
-        fpm.add_basic_alias_analysis_pass();
-        fpm.add_promote_memory_to_register_pass();
-        fpm.add_instruction_combining_pass();
-        fpm.add_reassociate_pass();
-
-        fpm.initialize();
-        // self.module.print_to_file("test.ll");
         // Build Object file
-        Target::initialize_native(&InitializationConfig::default())
-            .expect("Failed to initialize native target");
-        let opt = OptimizationLevel::Aggressive;
-        let reloc = RelocMode::Default;
-        let model = CodeModel::Default;
-        let path = Path::new("./target/main.o");
-        let target = Target::from_name("x86-64").unwrap();
-        let target_machine = target
+        let interm_path = filename.with_extension("imm");
+        let final_path = filename.with_extension("asm");
+        if optimize {
+            fpm.add_instruction_combining_pass();
+            fpm.add_reassociate_pass();
+            fpm.add_gvn_pass();
+            fpm.add_cfg_simplification_pass();
+            fpm.add_basic_alias_analysis_pass();
+            fpm.add_promote_memory_to_register_pass();
+            fpm.finalize();
+        }
+
+        Target::initialize_x86(&InitializationConfig::default());
+        let opt = if optimize {
+            OptimizationLevel::Aggressive
+        } else {
+            OptimizationLevel::Default
+        };
+        let target_machine = Target::from_name("x86-64")
+            .unwrap()
             .create_target_machine(
                 &TargetMachine::get_default_triple(),
-                "x86-64",
-                "+avx2",
+                TargetMachine::get_host_cpu_name()
+                    .to_str()
+                    .expect("failed to get host cpu name"),
+                TargetMachine::get_host_cpu_features()
+                    .to_str()
+                    .expect("failed to get host cpu features"),
                 opt,
-                reloc,
-                model,
+                RelocMode::Default,
+                CodeModel::Default,
             )
             .unwrap();
-        self.module.print_to_file("./test.ll").unwrap();
-        match target_machine.write_to_file(&self.module, FileType::Object, path) {
-            Ok(()) => (),
-            Err(e) => eprintln!("{}", e),
-        };
+        if output_intermidiate {
+            let b = self.module.print_to_string();
+            let s = b.to_str().unwrap();
+            println!("{}", s);
+        } else if output_final {
+            let s = target_machine
+                .write_to_memory_buffer(&self.module, FileType::Assembly)
+                .expect("failed to create final code");
+            let m = s.as_slice();
+            use std::io::Write;
+            let stdout = std::io::stdout();
+            let mut handle = stdout.lock();
 
+            handle.write_all(m).expect("failed to write to stdout");
+        } else {
+            match target_machine.write_to_file(&self.module, FileType::Assembly, &final_path) {
+                Ok(()) => (),
+                Err(e) => panic!("writing intemidiate file error: {}", e),
+            };
+            match target_machine.write_to_file(
+                &self.module,
+                FileType::Object,
+                &final_path.with_extension("o"),
+            ) {
+                Ok(()) => (),
+                Err(e) => panic!("writing intemidiate file error: {}", e),
+            };
+            match self.module.print_to_file(&interm_path) {
+                Ok(()) => (),
+                Err(e) => panic!("writing intemidiate file error: {}", e),
+            };
+        }
+        if output_final || output_intermidiate {
+            return Ok(());
+        }
         /*****************
             Extra steps
         *****************/
         // Build STD
         let s = Command::new("clang++")
-            .args(&["-c", "-O3", "-o", "target/libtonystd.o", "libtonystd.cpp"])
+            .args(&["-c", "-O3", "-o", "libtonystd.o", "libtonystd.cpp"])
             .output()
             .expect("failed");
         if !s.status.success() {
@@ -312,13 +353,16 @@ impl<'ctx> CodeGen<'ctx> {
             return Err(message);
         }
         print!("compiling {}\n", s.status);
+        let ext = if cfg!(windows) { "exe" } else { "" };
         // Linking STD
         let r = Command::new("clang++")
             .args(&[
                 "-O3",
-                path.to_str().unwrap(),
+                final_path.with_extension("o").to_str().unwrap(),
                 "target/libtonystd.o",
-                "llvm/gc-8.0.4/build/Release/gcmt-lib.lib",
+                "gcmt-lib.lib",
+                "-o",
+                final_path.with_extension(ext).to_str().unwrap(),
             ])
             .output()
             .expect("failed to link");
@@ -685,7 +729,7 @@ impl<'ctx> CodeGen<'ctx> {
             }
             Atomic::Name(_, name) => match self.find_pointer(name) {
                 Some(k) => k,
-                None => panic!("variable name not found"),
+                None => panic!("variable name not found: {}",),
             },
         }
     }

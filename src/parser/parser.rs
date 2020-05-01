@@ -125,7 +125,6 @@ impl<'a> Parser<'a> {
             let c = &self.token.kind;
             match c {
                 TokenKind::NewLine => {
-                    self.index += 1;
                     self.column = 0;
                 }
                 TokenKind::Space => {
@@ -216,13 +215,14 @@ impl<'a> Parser<'a> {
                     let mut result = String::new();
                     let mut c = self.read_char();
                     while c.is_ok() {
-                        result.push(c.unwrap());
-                        c = self.read_char();
+                        // println!("parser: {}", result);
                         if &self.stream[self.index..self.index + 1] == "\"" {
                             result.push(c.unwrap());
                             c = self.read_char();
                             break;
                         }
+                        result.push(c.unwrap());
+                        c = self.read_char();
                     }
                     self.index -= 1; // Note(dimkar): this reset the index back because there is a global +1 at the end of next token and it will skip the next token
                     self.token = match c {

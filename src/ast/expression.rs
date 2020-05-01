@@ -51,7 +51,7 @@ impl Display for Expr {
         };
         write!(f, "(expr ").unwrap();
         match self {
-            Expr::Atomic(_, _) => write!(f, "atomic"),
+            Expr::Atomic(_, a) => write!(f, "{}", a),
             Expr::CChar(c) => write!(f, "{}", c),
             Expr::CInt(n) => write!(f, "{}", n),
             Expr::Unary(t, Some(e)) => write!(f, "{} {}", to_symbol(t), e),
@@ -383,7 +383,7 @@ impl Expr {
                             break;
                         }
                         let atom = Atomic::generate(parser, symbol_table)?;
-
+                        // parser.back();
                         Expr::Atomic(atom.get_type(), atom)
                     }
                 }
@@ -520,7 +520,7 @@ impl Expr {
                 TokenKind::KNilQ => {
                     if parser.advance_token().get_kind() == TokenKind::LParenthesis {
                         // parser.get_token();
-                        let s = Expr::generate(parser, symbol_table, false)?;
+                        let s = Expr::generate(parser, symbol_table, is_paranthesis)?;
                         match s {
                             Expr::CNil => return Ok(Expr::CBool(true)),
                             _ => (),
@@ -548,7 +548,7 @@ impl Expr {
                 TokenKind::KHead => {
                     if parser.advance_token().get_kind() == TokenKind::LParenthesis {
                         // parser.get_token();
-                        let s = Expr::generate(parser, symbol_table, false)?;
+                        let s = Expr::generate(parser, symbol_table, is_paranthesis)?;
                         match s {
                             Expr::CNil => {
                                 return Err(Error::with_message(
@@ -583,7 +583,7 @@ impl Expr {
                 TokenKind::KTail => {
                     if parser.advance_token().get_kind() == TokenKind::LParenthesis {
                         // parser.get_token();
-                        let s = Expr::generate(parser, symbol_table, false)?;
+                        let s = Expr::generate(parser, symbol_table, is_paranthesis)?;
                         match s {
                             Expr::CNil => {
                                 return Err(Error::with_message(
@@ -638,7 +638,7 @@ impl Expr {
                         let head = result.unwrap();
                         if head.is_valid() {
                             parser.advance_token();
-                            let tail = Expr::generate(parser, symbol_table, false)?;
+                            let tail = Expr::generate(parser, symbol_table, is_paranthesis)?;
                             match tail.get_type() {
                                 TypeDecl::Nil => {
                                     return Ok(Expr::Hash(

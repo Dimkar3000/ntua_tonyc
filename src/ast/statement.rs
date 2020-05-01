@@ -1,8 +1,9 @@
 use crate::ast::typedecl::TypeDecl;
-use crate::symbol_table::SymbolTable;
-use crate::error::Error;
 use crate::ast::{Atomic, Expr};
+use crate::error::Error;
 use crate::parser::*;
+use crate::symbol_table::SymbolTable;
+use std::fmt::Display;
 #[derive(Debug, Clone)]
 pub enum Stmt {
     Exit,
@@ -19,8 +20,68 @@ pub enum Stmt {
     Call(String, Vec<Expr>),
 }
 
+impl Display for Stmt {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        match self {
+            Stmt::For(pre, cond, post, body) => {
+                write!(f, "for ").unwrap();
+                for i in pre {
+                    write!(f, "{},", i).unwrap();
+                }
+                write!(f, ";{};", cond).unwrap();
+                for i in post {
+                    write!(f, "{},", i).unwrap();
+                }
+                write!(f, ": ").unwrap();
+                for i in body {
+                    write!(f, "{}\t", i).unwrap();
+                }
+                write!(f, "end")
+            }
+            Stmt::Exit => write!(f, "exit"),
+            Stmt::Return(e) => write!(f, "return {}", e),
+            Stmt::Skip => write!(f, "skip"),
+            Stmt::Assign(a, b) => write!(f, "{} := {}", a, b),
+            Stmt::Call(name, args) => {
+                write!(f, "{}(", name).unwrap();
+                for i in args {
+                    write!(f, "{},", i).unwrap();
+                }
+                write!(f, ")")
+            }
+            Stmt::If {
+                condition: e,
+                stmts: s,
+                elseif: elses,
+                elseblock: elseb,
+            } => {
+                write!(f, "if {}: ", e).unwrap();
+                for i in s {
+                    write!(f, "{}\t", i).unwrap();
+                }
+                for i in elses {
+                    write!(f, "elsif {}: ", i.0).unwrap();
+                    for j in &i.1 {
+                        write!(f, "{}\t", j).unwrap();
+                    }
+                }
+                if elseb.len() > 0 {
+                    write!(f, "else: ").unwrap();
+                    for i in elseb {
+                        write!(f, "{}\t", i).unwrap();
+                    }
+                }
+                write!(f, "end")
+            }
+        }
+    }
+}
+
 impl Stmt {
-    pub fn generate(parser: & mut Parser, symbol_table: &mut SymbolTable<TypeDecl>) -> Result<Stmt, Error> {
+    pub fn generate(
+        parser: &mut Parser,
+        symbol_table: &mut SymbolTable<TypeDecl>,
+    ) -> Result<Stmt, Error> {
         let t = parser.read_token();
         match t.get_kind() {
             TokenKind::Name => {
@@ -28,7 +89,7 @@ impl Stmt {
                 match parser.read_token().get_kind() {
                     TokenKind::Assignement => {
                         parser.advance_token();
-                        
+
                         let expr = Expr::generate(parser, symbol_table, false)?;
                         if atom.get_type() != expr.get_type()  {
                             return Err(Error::with_message(parser.column, parser.line, &format!("Assigment requires that the variable is the same type as the expression, but {:?}:={:?}",atom.get_type(),expr.get_type()),"Ast"));
@@ -53,7 +114,11 @@ impl Stmt {
             }
             TokenKind::KReturn => {
                 parser.advance_token();
-                Ok(Stmt::Return(Box::new(Expr::generate(parser, symbol_table, false)?)))
+                Ok(Stmt::Return(Box::new(Expr::generate(
+                    parser,
+                    symbol_table,
+                    false,
+                )?)))
             }
             TokenKind::KFor => {
                 parser.advance_token();
@@ -67,7 +132,8 @@ impl Stmt {
                                 parser.column,
                                 parser.line,
                                 &format!("Expected simple Statement but got: {:?}", e),
-                            "Ast"))
+                                "Ast",
+                            ))
                         }
                     }
                     first_simples.push(s);
@@ -82,7 +148,8 @@ impl Stmt {
                                 parser.column,
                                 parser.line,
                                 &format!("Expected \",\" or \";\" but got: {:?}", e),
-                            "Ast"))
+                                "Ast",
+                            ))
                         }
                     }
                 }
@@ -98,7 +165,8 @@ impl Stmt {
                             parser.column,
                             parser.line,
                             &format!("Expected simple Statement but got: {:?}", e),
-                        "Ast"))
+                            "Ast",
+                        ))
                     }
                 };
                 let mut second_simples = Vec::new();
@@ -111,7 +179,8 @@ impl Stmt {
                                 parser.column,
                                 parser.line,
                                 &format!("Expected simple Statement but got: {:?}", e),
-                            "Ast"))
+                                "Ast",
+                            ))
                         }
                     }
                     second_simples.push(s);
@@ -126,7 +195,8 @@ impl Stmt {
                                 parser.column,
                                 parser.line,
                                 &format!("Expected \",\" or \":\" but got: {:?}", e),
-                            "Ast"))
+                                "Ast",
+                            ))
                         }
                     }
                 }
@@ -143,9 +213,22 @@ impl Stmt {
                 parser.advance_token();
                 let cond = Expr::generate(parser, symbol_table, false)?;
                 match cond {
-                    Expr::CBool(..) | Expr::Atomic(TypeDecl::Bool,_)|
-                    Expr::Comparison(..) | Expr::Negation(..) | Expr::NilCheck(..) => (),
-                    e => return Err(Error::with_message(parser.column, parser.line, &format!("condition of If statement should reduce to bool but instead got: {:?}",e),"Ast")),
+                    Expr::CBool(..)
+                    | Expr::Atomic(TypeDecl::Bool, _)
+                    | Expr::Comparison(..)
+                    | Expr::Negation(..)
+                    | Expr::NilCheck(..) => (),
+                    e => {
+                        return Err(Error::with_message(
+                            parser.column,
+                            parser.line,
+                            &format!(
+                            "condition of If statement should reduce to bool but instead got: {:?}",
+                            e
+                        ),
+                            "Ast",
+                        ))
+                    }
                 }
                 let mut elseifs = Vec::new();
                 let mut elseblock = Vec::new();
@@ -157,7 +240,8 @@ impl Stmt {
                             parser.column,
                             parser.line,
                             &format!("Expect Colon after If block's expression but got: {:?}", c),
-                        "Ast"))
+                            "Ast",
+                        ))
                     }
                 }
                 parser.advance_token();
@@ -173,8 +257,8 @@ impl Stmt {
                     parser.advance_token();
                     let cond = Expr::generate(parser, symbol_table, false)?;
                     match cond {
-                        Expr::Comparison(..) | Expr::Negation(..) | Expr::NilCheck(..) => (),
-                        e => return Err(Error::with_message(parser.column, parser.line, &format!("condition of elif statement should reduce to bool but instead got: {:?}",e),"Ast")),
+                        Expr::Comparison(..) | Expr::Negation(..) | Expr::NilCheck(..) | Expr::CBool(..) => (),
+                        e => return Err(Error::with_message(parser.column, parser.line, &format!("condition of elsif statement should reduce to bool but instead got: {:?}",e),"Ast")),
                     }
                     match parser.read_token().get_kind() {
                         TokenKind::Colon => (),
@@ -186,7 +270,8 @@ impl Stmt {
                                     "Expect Colon after ElseIf block's expression but got: {:?}",
                                     c
                                 ),
-                            "Ast"))
+                                "Ast",
+                            ))
                         }
                     }
                     parser.advance_token();
@@ -209,7 +294,8 @@ impl Stmt {
                                 parser.column,
                                 parser.line,
                                 &format!("Expect Colon after Else keyword but got: {:?}", c),
-                            "Ast"))
+                                "Ast",
+                            ))
                         }
                     }
                     parser.advance_token();
@@ -235,7 +321,8 @@ impl Stmt {
                     parser.read_token(),
                     parser.previous_token()
                 ),
-            "Ast")),
+                "Ast",
+            )),
         }
     }
 }

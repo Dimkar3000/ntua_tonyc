@@ -28,7 +28,7 @@ impl Display for Atomic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         match self {
             Atomic::Name(_, n) => write!(f, "(atom {})", n),
-            Atomic::CString(s) => write!(f, "(atom \"{}\")", s),
+            Atomic::CString(s) => write!(f, "(atom {:?})", s),
             Atomic::Accessor(a, e) => write!(f, "(atom {}[{}])", a, e),
             Atomic::FuncCall(_, n, exp) => {
                 write!(f, "(atom {}(", n).unwrap();
@@ -98,7 +98,6 @@ impl Atomic {
                                 Ok(k) => k,
                                 Err(e) => return Err(e.extend("Function Arguments failed", "Ast")),
                             };
-
                             args.push(tmp);
                             match parser.read_token().get_kind() {
                                 TokenKind::Comma => (),

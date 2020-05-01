@@ -2,11 +2,18 @@ use crate::ast::TypeDecl;
 use crate::error::Error;
 use crate::parser::*;
 use crate::symbol_table::SymbolTable;
+use std::fmt::Display;
 
 #[derive(Debug, Clone)]
 pub struct VarDef {
     pub name: String,
     pub var_type: TypeDecl,
+}
+
+impl Display for VarDef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        write!(f, "{} {}", self.var_type, self.name)
+    }
 }
 
 impl VarDef {
