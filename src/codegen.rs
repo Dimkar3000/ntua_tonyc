@@ -1,10 +1,11 @@
 use crate::ast::Expr;
 use crate::parser::TokenKind;
+use crate::symbol_table::SymbolTable;
 
-use std::collections::HashMap;
 use std::path::Path;
 use std::process::Command;
 use std::result::Result;
+use std::time::SystemTime;
 
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
@@ -12,6 +13,7 @@ use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::IntPredicate;
 
+use crate::ast::*;
 use inkwell::module::Linkage;
 use inkwell::passes::*;
 use inkwell::targets::*;
@@ -20,13 +22,19 @@ use inkwell::values::*;
 use inkwell::AddressSpace;
 use inkwell::OptimizationLevel;
 
-use crate::ast::*;
+// this should be unique enough
+fn random_sub_str() -> String {
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap();
+    now.as_nanos().to_string()
+}
 
 pub struct CodeGen<'ctx> {
     pub context: &'ctx Context,
     pub module: Module<'ctx>,
     pub builder: Builder<'ctx>,
-    pub global_funcs: HashMap<String, FunctionValue<'ctx>>,
+    pub function_table: SymbolTable<FunctionValue<'ctx>>,
     pub variable_list: Vec<(String, PointerValue<'ctx>)>,
 }
 
@@ -88,35 +96,26 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
-    fn funcdef_to_function(&mut self, func: &FuncDef) -> FunctionValue<'ctx> {
-        let mut args = Vec::new();
-        for i in &func.header.arguments {
-            let t = self.typedecl_to_type(&i.def.var_type);
-            if i.is_ref {
-                args.push(t.ptr_type(AddressSpace::Generic).into());
-            } else {
-                args.push(t);
-            }
-        }
-        let fun_type;
-        if func.header.rtype == TypeDecl::Void {
-            fun_type = self.context.void_type().fn_type(&args, false);
+    fn store_function(
+        &mut self,
+        name: &str,
+        ftype: FunctionType<'ctx>,
+    ) -> Result<FunctionValue<'ctx>, String> {
+        if self.function_table.in_current_scope("name") {
+            Err("function with the same name already exists".to_owned())
+        } else if self.function_table.lookup(name).is_some() {
+            let lname = format!("{}_{}", name, random_sub_str());
+            let f = self.module.add_function(&lname, ftype, None);
+            self.function_table.insert(name, f)?;
+            Ok(f)
         } else {
-            fun_type = self
-                .typedecl_to_type(&func.header.rtype)
-                .fn_type(&args, false);
-        }
-        match self.module.get_function(&func.header.name) {
-            Some(k) => k,
-            None => {
-                let r = self.module.add_function(&func.header.name, fun_type, None);
-                self.store_function(func.header.name.clone(), r);
-                r
-            }
+            let f = self.module.add_function(name, ftype, None);
+            self.function_table.insert(name, f)?;
+            Ok(f)
         }
     }
 
-    fn funcdecl_to_function(&mut self, func: &FuncDecl) -> FunctionValue<'ctx> {
+    fn funcdecl_to_function_type(&mut self, func: &FuncDecl) -> FunctionType<'ctx> {
         let mut args = Vec::new();
         for i in &func.arguments {
             let t = self.typedecl_to_type(&i.def.var_type);
@@ -126,74 +125,64 @@ impl<'ctx> CodeGen<'ctx> {
                 args.push(t);
             }
         }
-        let fun_type;
+
         if func.rtype == TypeDecl::Void {
-            fun_type = self.context.void_type().fn_type(&args, false);
+            self.context.void_type().fn_type(&args, false)
         } else {
-            fun_type = self.typedecl_to_type(&func.rtype).fn_type(&args, false);
-        }
-        match self.module.get_function(&func.name) {
-            Some(k) => k,
-            None => {
-                let r = self.module.add_function(&func.name, fun_type, None);
-                self.store_function(func.name.clone(), r);
-                r
-            }
+            self.typedecl_to_type(&func.rtype).fn_type(&args, false)
         }
     }
 
-    fn find_pointer(&self, name: &String) -> Option<PointerValue<'ctx>> {
+    fn func_to_function_type(&mut self, func: &FuncDef) -> FunctionType<'ctx> {
+        self.funcdecl_to_function_type(&func.header)
+    }
+
+    fn find_pointer(&self, name: &str) -> Option<PointerValue<'ctx>> {
         self.variable_list
             .iter()
             .rev()
-            .find_map(|x| if &x.0 == name { Some(x.1) } else { None })
-    }
-
-    fn store_function(&mut self, name: String, f: FunctionValue<'ctx>) {
-        match self.global_funcs.insert(name, f) {
-            Some(_) => (),
-            None => (),
-        }
+            .find_map(|x| if x.0 == name { Some(x.1) } else { None })
     }
 }
 
 impl<'ctx> CodeGen<'ctx> {
-    pub fn new(context: &'ctx Context, module: Module<'ctx>) -> Self {
-        let mut std = HashMap::new();
+    pub fn new(context: &'ctx Context, module: Module<'ctx>) -> Result<Self, String> {
+        let mut std = SymbolTable::new();
+        std.open_scope("root");
 
         let gc_malloct = context
             .i8_type()
             .ptr_type(AddressSpace::Generic)
             .fn_type(&[context.i64_type().into()], false);
         let gc_malloc = module.add_function("GC_malloc", gc_malloct, Some(Linkage::External));
-        std.insert("GC_malloc".to_owned(), gc_malloc);
+        std.insert("GC_malloc".to_owned(), gc_malloc)?;
 
         let strlent = context.i16_type().fn_type(
             &[context.i8_type().ptr_type(AddressSpace::Generic).into()],
             false,
         );
         let strlen = module.add_function("strlen", strlent, Some(Linkage::External));
-        std.insert("strlen".to_owned(), strlen);
+        std.insert("strlen".to_owned(), strlen)?;
 
         let putit = context
             .void_type()
             .fn_type(&[context.i16_type().as_basic_type_enum()], false);
         let puti = module.add_function("puti", putit, Some(Linkage::External));
-        std.insert("puti".to_owned(), puti);
+        std.insert("puti".to_owned(), puti)?;
 
         // Function: decl putb (bool b)
         let putbt = context
             .void_type()
             .fn_type(&[context.bool_type().into()], false);
         let putb = module.add_function("putb", putbt, Some(Linkage::External));
-        std.insert("putb".to_owned(), putb);
+        std.insert("putb".to_owned(), putb)?;
 
         // Function: decl putc (char c)
         let putct = context
             .void_type()
             .fn_type(&[context.i8_type().into()], false);
         let putc = module.add_function("puti8", putct, Some(Linkage::External));
-        std.insert("putc".to_owned(), putc);
+        std.insert("putc".to_owned(), putc)?;
 
         // Warning(dimkar): This Function has a different name in the c code "putstring", just to void colission with c++ function names
         // Function: decl puts (char[] s)
@@ -202,18 +191,17 @@ impl<'ctx> CodeGen<'ctx> {
             false,
         );
         let puts = module.add_function("putstring", putst, Some(Linkage::External));
-        std.insert("puts".to_owned(), puts);
-        module.add_function("puts", putst, Some(Linkage::External));
+        std.insert("puts".to_owned(), puts)?;
 
         // Function: decl int geti ()
         let getit = context.i16_type().fn_type(&[], false);
         let geti = module.add_function("geti", getit, Some(Linkage::External));
-        std.insert("geti".to_owned(), geti);
+        std.insert("geti".to_owned(), geti)?;
 
         // Function: decl bool getb ()
         let getbt = context.bool_type().fn_type(&[], false);
         let getb = module.add_function("getb", getbt, Some(Linkage::External));
-        std.insert("getb".to_owned(), getb);
+        std.insert("getb".to_owned(), getb)?;
 
         // Function: decl gets (int n, char[] s)
         let getst = context.void_type().fn_type(
@@ -224,20 +212,20 @@ impl<'ctx> CodeGen<'ctx> {
             false,
         );
         let gets = module.add_function("gets", getst, Some(Linkage::External));
-        std.insert("gets".to_owned(), gets);
+        std.insert("gets".to_owned(), gets)?;
 
         // Function: decl char getc ()
         let getct = context.i8_type().fn_type(&[], false);
         let getc = module.add_function("getcchar", getct, Some(Linkage::External));
-        std.insert("getc".to_owned(), getc);
+        std.insert("getc".to_owned(), getc)?;
 
-        CodeGen {
+        Ok(CodeGen {
             context,
-            module: module,
+            module,
             builder: context.create_builder(),
-            global_funcs: std,
+            function_table: std,
             variable_list: Vec::new(),
-        }
+        })
     }
 
     pub fn compile<'a>(
@@ -250,20 +238,29 @@ impl<'ctx> CodeGen<'ctx> {
     ) -> Result<(), String> {
         // Build Ast
         let main = ast.generate();
-        if main.is_err() {
-            return Err(format!("{}", main.unwrap_err()));
+        if let Err(e) = main {
+            return Err(format!("{}", e));
         }
         let main = main.unwrap();
-        if main.header.arguments.len() != 0 || main.header.rtype != TypeDecl::Void {
+        if !main.header.arguments.is_empty() || main.header.rtype != TypeDecl::Void {
             return Err("Top level Function shouldn't have argument or a return type".to_owned());
         }
 
-        // Create Code
-        self.compile_func(&main);
+        // Create wrapper
+        let f = self
+            .module
+            .add_function("main", self.context.i32_type().fn_type(&[], false), None);
+        let entry_block = self.context.append_basic_block(f, "main_entry");
 
+        // Create Code
+        self.compile_func(&main)?;
+        // Fill wrapper
+        let callee = self.module.get_function(&main.header.name).unwrap();
+        self.builder.position_at_end(entry_block);
+        self.builder.build_call(callee, &[], "call_entry");
+        self.builder
+            .build_return(Some(&self.context.i32_type().const_int(0, false)));
         // Clean global function table
-        self.global_funcs.clear();
-        self.global_funcs.shrink_to_fit();
         if let Err(e) = self.module.verify() {
             eprintln!("verify error: {}", e);
         }
@@ -307,7 +304,7 @@ impl<'ctx> CodeGen<'ctx> {
         if output_intermidiate {
             let b = self.module.print_to_string();
             let s = b.to_str().unwrap();
-            println!("{}", s);
+            print!("{}", s);
         } else if output_final {
             let s = target_machine
                 .write_to_memory_buffer(&self.module, FileType::Assembly)
@@ -352,7 +349,7 @@ impl<'ctx> CodeGen<'ctx> {
             print!("Compiling std failed");
             return Err(message);
         }
-        print!("compiling {}\n", s.status);
+        println!("compiling {}", s.status);
         let ext = if cfg!(windows) { "exe" } else { "" };
         // Linking STD
         let r = Command::new("clang++")
@@ -372,17 +369,22 @@ impl<'ctx> CodeGen<'ctx> {
             print!("Linking std failed");
             return Err(message);
         }
-        print!("linking {}\n", s.status);
+        println!("linking {}", s.status);
         Ok(())
     }
 
     // Sub compilations
 
     // Func
-    fn compile_func(&mut self, func: &FuncDef) {
+    fn compile_func(&mut self, func: &FuncDef) -> Result<(), String> {
         // Function Signature
-        let function = self.funcdef_to_function(&func);
-        // function.set_gc("simongc");
+        let ctype = self.func_to_function_type(&func);
+        let function = if self.function_table.in_current_scope(&func.header.name) {
+            *self.function_table.lookup(&func.header.name).unwrap()
+        } else {
+            self.store_function(&func.header.name, ctype)?
+        };
+        self.function_table.open_scope(&func.header.name);
         let entry_block = self
             .context
             .append_basic_block(function, &format!("{}_entry", func.header.name));
@@ -414,13 +416,15 @@ impl<'ctx> CodeGen<'ctx> {
         }
         // Create llvm function for all defs and decls
         for i in &func.defs {
-            let f = self.funcdef_to_function(&i);
-            self.store_function(i.header.name.clone(), f);
+            let ftype = self.func_to_function_type(i);
+            self.store_function(&i.header.name, ftype)?;
         }
 
         for i in &func.decls {
-            let f = self.funcdecl_to_function(&i);
-            self.store_function(i.name.clone(), f);
+            if !self.function_table.in_current_scope(&i.name) {
+                let ftype = self.funcdecl_to_function_type(i);
+                self.store_function(&i.name, ftype)?;
+            }
         }
 
         // Variables
@@ -436,7 +440,7 @@ impl<'ctx> CodeGen<'ctx> {
         }
 
         // Statements
-        self.compile_stmts(func, &entry_block);
+        self.compile_stmts(func, entry_block);
 
         // Cleanup
 
@@ -450,20 +454,24 @@ impl<'ctx> CodeGen<'ctx> {
 
         // Compile Function definitions
         for i in &func.defs {
-            self.compile_func(i);
+            self.compile_func(i)?;
         }
+        self.function_table.close_scope();
+        Ok(())
     }
+
+    #[allow(clippy::cognitive_complexity)]
     fn compile_stmt(
         &mut self,
         stmt: &Stmt,
         func: &FuncDef,
-        block: &BasicBlock<'ctx>,
-        exit_block: &BasicBlock<'ctx>,
+        block: BasicBlock<'ctx>,
+        exit_block: BasicBlock<'ctx>,
         exited: &mut bool,
     ) -> bool {
         match stmt {
             Stmt::Exit => {
-                self.builder.build_unconditional_branch(*exit_block);
+                self.builder.build_unconditional_branch(exit_block);
                 *exited = true;
             }
             Stmt::Return(exp) => {
@@ -490,15 +498,17 @@ impl<'ctx> CodeGen<'ctx> {
             } => {
                 let condition = self.compile_exp(cond, false);
                 assert!(condition.is_int_value());
-                let mut then_block = self
-                    .context
-                    .insert_basic_block_after(*block, &format!("{:?}_if", block.get_name()));
-                let mut else_block = self
-                    .context
-                    .insert_basic_block_after(then_block, &format!("{:?}_else", block.get_name()));
+                let mut then_block = self.context.insert_basic_block_after(
+                    block,
+                    &format!("{}_if", block.get_name().to_str().unwrap()),
+                );
+                let mut else_block = self.context.insert_basic_block_after(
+                    then_block,
+                    &format!("{}_else", block.get_name().to_str().unwrap()),
+                );
                 let if_exit_block = self.context.insert_basic_block_after(
                     then_block,
-                    &format!("{:?}_ifexit", block.get_name()),
+                    &format!("{}_ifexit", block.get_name().to_str().unwrap()),
                 );
                 self.builder.build_conditional_branch(
                     condition.into_int_value(),
@@ -510,7 +520,7 @@ impl<'ctx> CodeGen<'ctx> {
                 let mut contains_return = false;
                 let mut exited = false;
                 for i in main_stmt {
-                    if self.compile_stmt(i, func, &then_block, &exit_block, &mut exited) {
+                    if self.compile_stmt(i, func, then_block, exit_block, &mut exited) {
                         assert!(!contains_return);
                         contains_return = true;
                     }
@@ -519,14 +529,14 @@ impl<'ctx> CodeGen<'ctx> {
                     self.builder.build_unconditional_branch(if_exit_block);
                 }
                 self.builder.position_at_end(else_block);
-                for i in 0..elseifs.len() {
+                for (i, elseif) in elseifs.iter().enumerate() {
                     then_block = self
                         .context
                         .insert_basic_block_after(else_block, &format!("else_ifthen{}", i));
                     else_block = self
                         .context
                         .insert_basic_block_after(else_block, &format!("else_ifelse{}", i));
-                    let condition = self.compile_exp(&elseifs[i].0, false);
+                    let condition = self.compile_exp(&elseif.0, false);
                     assert!(condition.is_int_value());
                     self.builder.build_conditional_branch(
                         condition.into_int_value(),
@@ -537,8 +547,8 @@ impl<'ctx> CodeGen<'ctx> {
                     self.builder.position_at_end(then_block);
                     let mut contains_return = false;
                     let mut exited = false;
-                    for i in &elseifs[i].1 {
-                        if self.compile_stmt(&i, func, &then_block, &exit_block, &mut exited) {
+                    for i in &elseif.1 {
+                        if self.compile_stmt(&i, func, then_block, exit_block, &mut exited) {
                             assert!(!contains_return);
                             contains_return = true;
                         }
@@ -552,7 +562,7 @@ impl<'ctx> CodeGen<'ctx> {
                 let mut contains_return = false;
                 let mut exited = false;
                 for i in else_stmts {
-                    if self.compile_stmt(i, func, &else_block, &exit_block, &mut exited) {
+                    if self.compile_stmt(i, func, else_block, exit_block, &mut exited) {
                         assert!(!contains_return);
                         contains_return = true;
                     }
@@ -565,9 +575,9 @@ impl<'ctx> CodeGen<'ctx> {
             Stmt::For(pre_stmts, cond, post_stmts, main_stmts) => {
                 let mut exited = false;
                 for i in pre_stmts {
-                    self.compile_stmt(&i, func, block, &exit_block, &mut exited);
+                    self.compile_stmt(&i, func, block, exit_block, &mut exited);
                 }
-                let for_header = self.context.insert_basic_block_after(*block, "for_header");
+                let for_header = self.context.insert_basic_block_after(block, "for_header");
                 let for_body = self
                     .context
                     .insert_basic_block_after(for_header, "for_body");
@@ -587,13 +597,13 @@ impl<'ctx> CodeGen<'ctx> {
                 let mut returned = false;
                 self.builder.position_at_end(for_body);
                 for i in main_stmts {
-                    if self.compile_stmt(i, func, &for_body, &for_exit, &mut exited) {
+                    if self.compile_stmt(i, func, for_body, for_exit, &mut exited) {
                         assert!(!returned);
                         returned = true;
                     }
                 }
                 for i in post_stmts {
-                    if self.compile_stmt(i, func, &for_body, &for_exit, &mut exited) {
+                    if self.compile_stmt(i, func, for_body, for_exit, &mut exited) {
                         assert!(!returned);
                         returned = true;
                     }
@@ -605,9 +615,9 @@ impl<'ctx> CodeGen<'ctx> {
             }
             Stmt::Skip => eprintln!("skip statement found, test what happended"),
             Stmt::Call(name, args) => {
-                let function = *self.global_funcs.get(name).unwrap();
+                let function = *self.function_table.lookup(name).unwrap();
                 let mut v = Vec::new();
-                for i in 0..args.len() {
+                for (i, arg) in args.iter().enumerate() {
                     let mut is_ref = false;
                     for j in &func.defs {
                         if &j.header.name == name && j.header.arguments[i].is_ref {
@@ -623,7 +633,7 @@ impl<'ctx> CodeGen<'ctx> {
                             }
                         }
                     }
-                    let r = self.compile_exp(&args[i], is_ref);
+                    let r = self.compile_exp(&arg, is_ref);
                     v.push(r);
                 }
                 self.builder
@@ -652,7 +662,7 @@ impl<'ctx> CodeGen<'ctx> {
     // Stmt
     // Note: I pass the FuncDef some I can look up Function Definition for call statements.
     //       I need to do that to understand how to pass the arguments( by ref or by value).
-    fn compile_stmts(&mut self, func: &FuncDef, block: &BasicBlock<'ctx>) {
+    fn compile_stmts(&mut self, func: &FuncDef, block: BasicBlock<'ctx>) {
         let mut exited = false;
         let mut returned = false;
         for i in 0..func.stmts.len() {
@@ -678,7 +688,7 @@ impl<'ctx> CodeGen<'ctx> {
                     Some(v) => v.as_basic_value_enum().into_pointer_value(),
                     None => self
                         .builder
-                        .build_global_string_ptr(s, &format!("ptr_{:?}", s))
+                        .build_global_string_ptr(s, &format!("ptr_{}", s))
                         .as_basic_value_enum()
                         .into_pointer_value(),
                 };
@@ -699,10 +709,13 @@ impl<'ctx> CodeGen<'ctx> {
                 }
             }
             Atomic::FuncCall(_, name, args) => {
-                let function = self.global_funcs[&atom.get_name()];
+                let function = *self
+                    .function_table
+                    .lookup(&atom.get_name())
+                    .expect("function call failed to find function");
                 let mut v = Vec::new();
-                for i in 0..args.len() {
-                    let r = self.compile_exp(&args[i], false);
+                for (i, arg) in args.iter().enumerate() {
+                    let r = self.compile_exp(&arg, false);
                     if r.is_pointer_value()
                         && r.into_pointer_value().is_null()
                         && r.into_pointer_value().is_const()
@@ -710,13 +723,11 @@ impl<'ctx> CodeGen<'ctx> {
                         // handling nill
                         let arg = function.get_nth_param(i as u32).unwrap();
                         let r0 = self.create_typed_nil(&arg.get_type(), false);
-                        v.push(r0.into());
+                        v.push(r0);
                     } else {
                         v.push(r);
                     }
                 }
-                // println!("function: {:?}", function);
-                // println!("args: {:?}", v);
                 let result = self
                     .builder
                     .build_call(function, &v, &format!("call_{}", name))
@@ -738,9 +749,9 @@ impl<'ctx> CodeGen<'ctx> {
         ctype: &BasicTypeEnum<'ctx>,
         is_ref: bool,
     ) -> BasicValueEnum<'ctx> {
-        let gc_malloc = self.global_funcs.get("GC_malloc").unwrap();
+        let gc_malloc = self.module.get_function("GC_malloc").unwrap();
         let size = ctype.into_struct_type().size_of().unwrap().into();
-        let data = self.builder.build_call(*gc_malloc, &[size], "GC_malloc");
+        let data = self.builder.build_call(gc_malloc, &[size], "gc_malloc_d");
         let new_tail = self
             .builder
             .build_bitcast(
@@ -782,11 +793,11 @@ impl<'ctx> CodeGen<'ctx> {
                     self.create_typed_nil(&ctype, true)
                 } else {
                     // Copy data to new ptr
-                    let gc_malloc = self.global_funcs.get("GC_malloc").unwrap();
+                    let gc_malloc = self.module.get_function("GC_malloc").unwrap();
                     let size = self.typed_size_of(&ctype).unwrap();
                     let data = self
                         .builder
-                        .build_call(*gc_malloc, &[size.into()], "GC_malloc");
+                        .build_call(gc_malloc, &[size.into()], "gc_malloc_d");
                     let p = self
                         .builder
                         .build_bitcast(
@@ -799,11 +810,11 @@ impl<'ctx> CodeGen<'ctx> {
                     self.builder.build_store(p, tail_data);
                     p.into()
                 };
-                let gc_malloc = self.global_funcs.get("GC_malloc").unwrap();
+                let gc_malloc = self.module.get_function("GC_malloc").unwrap();
                 let size = self.typed_size_of(&ctype).unwrap();
                 let gc_data = self
                     .builder
-                    .build_call(*gc_malloc, &[size.into()], "GC_malloc");
+                    .build_call(gc_malloc, &[size.into()], "gc_malloc_d");
                 let head = self
                     .builder
                     .build_bitcast(
@@ -853,7 +864,7 @@ impl<'ctx> CodeGen<'ctx> {
                 if is_ref {
                     head.into()
                 } else {
-                    self.builder.build_load(head, "deref").into()
+                    self.builder.build_load(head, "deref")
                 }
             }
             Expr::NilCheck(x) => {
@@ -892,11 +903,9 @@ impl<'ctx> CodeGen<'ctx> {
                 };
                 let ptr = self.builder.build_load(t, "tail");
                 if is_ref {
-                    ptr.into()
+                    ptr
                 } else {
-                    self.builder
-                        .build_load(ptr.into_pointer_value(), "data")
-                        .into()
+                    self.builder.build_load(ptr.into_pointer_value(), "data")
                 }
             }
             Expr::Head(_t, exp) => {
@@ -904,7 +913,7 @@ impl<'ctx> CodeGen<'ctx> {
                 assert!(list.is_pointer_value());
                 let element = unsafe {
                     self.builder
-                        .build_struct_gep(list.into_pointer_value().into(), 0, "head_ptr")
+                        .build_struct_gep(list.into_pointer_value(), 0, "head_ptr")
                 };
                 self.builder.build_load(element, "head")
             }
@@ -926,10 +935,8 @@ impl<'ctx> CodeGen<'ctx> {
                 if is_ref {
                     return ptr.into();
                 }
-                let result = self
-                    .builder
-                    .build_load(ptr, &format!("{:?}_ptr_{}", t, at.get_name()));
-                result
+                self.builder
+                    .build_load(ptr, &format!("{}_ptr_{}", t, at.get_name()))
             }
             Expr::NewArray(t, exp) => {
                 let t = self.typedecl_to_type(&*t);
@@ -942,10 +949,10 @@ impl<'ctx> CodeGen<'ctx> {
                 );
                 let t_size = self.typed_size_of(&t).unwrap();
                 let total_size = self.builder.build_int_add(size, t_size, "array_size");
-                let gc_malloc = self.global_funcs.get("GC_malloc").unwrap();
-                let data = self
-                    .builder
-                    .build_call(*gc_malloc, &[total_size.into()], "GC_malloc");
+                let gc_malloc = self.module.get_function("GC_malloc").unwrap();
+                let data =
+                    self.builder
+                        .build_call(gc_malloc, &[total_size.into()], "gc_malloc_new");
                 self.builder
                     .build_bitcast(data.try_as_basic_value().left().unwrap(), t, "cast_gc")
             }
@@ -990,9 +997,9 @@ impl<'ctx> CodeGen<'ctx> {
                     .compile_exp(y.as_ref().unwrap(), false)
                     .into_int_value();
                 if t == &TokenKind::KAnd {
-                    BasicValueEnum::IntValue(self.builder.build_and(x, y, &format!("op_and")))
+                    BasicValueEnum::IntValue(self.builder.build_and(x, y, "op_and"))
                 } else if t == &TokenKind::KOr {
-                    BasicValueEnum::IntValue(self.builder.build_or(x, y, &format!("op_or")))
+                    BasicValueEnum::IntValue(self.builder.build_or(x, y, "op_or"))
                 } else {
                     unreachable!("logical expression with token: {:?}", t)
                 }
@@ -1009,7 +1016,7 @@ impl<'ctx> CodeGen<'ctx> {
                     TokenKind::GreatOrEqual => IntPredicate::SGE,
                     TokenKind::Less => IntPredicate::SLT,
                     TokenKind::LessOrEqual => IntPredicate::SLE,
-                    e => panic!("Comparison with token: {:?}", e),
+                    e => panic!("Comparison with token: {:?}", (e, x, y)),
                 };
                 let x = self
                     .compile_exp(x.as_ref().unwrap(), false)
@@ -1021,7 +1028,7 @@ impl<'ctx> CodeGen<'ctx> {
                     predicate,
                     x,
                     y,
-                    &format!("op_{:?}", t),
+                    &format!("op_{}", t),
                 ))
             }
 

@@ -4,13 +4,16 @@ bool c,d
 <*
 Its if close has an error. Fix them to test next one
 *>
+    a:= 5
+    b:= 4
+    c:= true
     if a <= b: 
         puti(a)
-    elif not c:
+    elsif not c:
         puti(b)
-    elif d = true:
+    elsif d = true:
         putb(c)
-    elif 'a' = 'c':
+    elsif 'a' = 'c':
         putb(c)
     else :
         putc('a')

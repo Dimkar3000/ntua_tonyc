@@ -1,14 +1,5 @@
 def main ():
-    def writeList (char[] msg; list[int] l):
-        bool more
-
-        puts(msg)
-        for more := false; not nil?(l); l := tail(l), more := true:
-            if more: puts(", ") end
-            puti(head(l))
-        end
-        puts("\n")
-    end
+    decl writeList (char[] msg; list[int] l)
     def list[int] qsort (list[int] l):
 
        def list[int] qsort_aux (list[int] l, rest):
@@ -30,8 +21,18 @@ def main ():
            
            end
            return qsort_aux(lt, pivot # qsort_aux(ge, rest))
-       end
+       end       
        return qsort_aux(l, nil)
+    end
+    def writeList (char[] msg; list[int] l):
+        bool more
+
+        puts(msg)
+        for more := false; not nil?(l); l := tail(l), more := true:
+            if more: puts(", ") end
+            puti(head(l))
+        end
+        puts("\n")
     end
     
 

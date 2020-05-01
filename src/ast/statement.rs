@@ -65,7 +65,7 @@ impl Display for Stmt {
                         write!(f, "{}\t", j).unwrap();
                     }
                 }
-                if elseb.len() > 0 {
+                if !elseb.is_empty() {
                     write!(f, "else: ").unwrap();
                     for i in elseb {
                         write!(f, "{}\t", i).unwrap();

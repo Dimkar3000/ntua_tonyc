@@ -13,9 +13,31 @@
 - Εμβέλεια μεταβλητών όπως στην Pascal.
 - Βιβλιοθήκη συναρτήσεων.
 
-Στο φάκελο `files` υπάρχει η εκφώνησει της άσκησης μαζί με ότι άλλο δόθηκε για την εργασία
+Στο φάκελο `files` υπάρχει η εκφώνησει της άσκησης μαζί με ότι άλλο δόθηκε για την εργασία. Επίσης έχει τον φάκελο `examples` με προγράμματα που μπορούν να γίνουν compile ή που γυρνάε συσγεκριμένα error.
+
+# Installing
+
+## Requirements
+
+- Rust
+- LLVM 10
+- The **Boehm-Demers-Weiser** garbage collector
+
+You will need rust on your machine in order be able to compile this project. You will need either to add the ```LLVM_SYS_100_PREFIX=/llvm/path/``` to your path (Windows) or run cargo like this:
+
+```bash
+cd your/crate/path
+LLVM_SYS_100_PREFIX=llvm-10.0.0.src\build\install cargo build
+```
+
+Also will need to compile `llvm 10` for this project to work. Follow [this](https://crates.io/crates/llvm-sys) instuction to compiler llvm and set it up for this project.
+
+I used the Boehm-Demers-Weiser garbage collector. You will need to compile it and get the compiled file `gcmt-lib.lib` on the root of the rust project, next to **_cargo.toml_**. Get it [here](https://github.com/ivmai/bdwgc)
+
+The library was built on release mode with /MT flag for msvc on windows
 
 # Todo List
+
 - [x] Λεκτικός αναλυτής
 - [x] Συντακτικός αναλυτής
 - [x] Σημασιολογικός αναλυτής

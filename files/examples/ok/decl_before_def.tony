@@ -1,9 +1,15 @@
 def main():
     decl b()
     def a():
+        puts("a\n")
         b()
     end
     def b():
+        puts("b\n")
         a()
     end
+
+    puts("press Enter to start:")
+    getc()
+    a()
 end

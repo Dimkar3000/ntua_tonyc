@@ -25,7 +25,7 @@ impl<'a> Parser<'a> {
                 line: 0,
                 extra: TokenExtra::None,
             },
-            stream: stream,
+            stream,
             index: 0,
             p_index: 0,
             column: 0,

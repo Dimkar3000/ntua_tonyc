@@ -54,11 +54,17 @@ fn main() -> Result<(), Box<dyn Error>> {
                 .conflicts_with("intermidiate")
                 .conflicts_with("INPUT"),
         )
+        .arg(
+            Arg::with_name("optimize")
+                .short('O')
+                .about("enable optimizations")
+                .takes_value(false),
+        )
         .get_matches();
 
     let context = Context::create();
     let module = context.create_module("main");
-    let mut codegen = CodeGen::new(&context, module);
+    let mut codegen = CodeGen::new(&context, module)?;
     // Read Input
     let mut data = Vec::new();
     if matches.is_present("intermidiate") || matches.is_present("final") {
@@ -75,11 +81,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         &mut ast,
         matches.is_present("intermidiate"),
         matches.is_present("final"),
-        false,
+        matches.is_present("optimize"),
         &p,
     );
-    if a.is_err() {
-        panic!("{}", a.unwrap_err());
+    if let Err(a) = a {
+        panic!("{}", a);
     }
     Ok(())
 }

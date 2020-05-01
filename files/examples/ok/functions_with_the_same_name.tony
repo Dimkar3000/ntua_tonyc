@@ -1,4 +1,4 @@
-def main ():
+def main():
     def test():
         def test():
             puts("test2\n")
@@ -6,7 +6,6 @@ def main ():
         puts("test\n")
         test()
     end
-    puts("Hello world!\n")
     test()
     test()
 end

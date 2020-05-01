@@ -136,17 +136,15 @@ impl Expr {
     ///
     /// this function takes 2 expressions and tries to apply the rgiht expression to the left.
     /// In case of failure it returns the left Expression
+    #[allow(clippy::many_single_char_names)]
     pub fn match_expr(left: Option<Box<Expr>>, right: Expr) -> Result<Expr, Expr> {
         if left.is_none() {
             return Ok(right);
         }
         let left = left.unwrap();
-        let high = |t| {
-            return t == TokenKind::Multiplication
-                || t == TokenKind::Division
-                || t == TokenKind::KMod;
-        };
-        let low = |t| return t == TokenKind::Addition || t == TokenKind::Subtraction;
+        let high =
+            |t| t == TokenKind::Multiplication || t == TokenKind::Division || t == TokenKind::KMod;
+        let low = |t| t == TokenKind::Addition || t == TokenKind::Subtraction;
         let is_logical = |e| match e {
             Expr::Logical(..) => true,
             _ => false,
@@ -250,97 +248,6 @@ impl Expr {
                 }
             }
             _ => Err(*left),
-        }
-    }
-    fn reduce(expr: Expr) -> Expr {
-        match expr {
-            Expr::Unary(t, Some(e)) => {
-                let l = Expr::reduce(*e);
-                match (t, &l) {
-                    (TokenKind::Addition, &Expr::CInt(n)) => Expr::CInt(n),
-                    (TokenKind::Subtraction, &Expr::CInt(n)) => Expr::CInt(-n),
-                    _ => Expr::Unary(t, Some(l.bx())),
-                }
-            }
-            Expr::Binary(t, Some(a), Some(b)) => {
-                let x = Expr::reduce(*a);
-                let y = Expr::reduce(*b);
-                match (&t, &x, &y) {
-                    (TokenKind::Addition, &Expr::CInt(f), &Expr::CInt(s)) => {
-                        Expr::CInt(f.wrapping_add(s))
-                    }
-                    (TokenKind::Subtraction, &Expr::CInt(f), &Expr::CInt(s)) => {
-                        Expr::CInt(f.wrapping_sub(s))
-                    }
-                    (TokenKind::Multiplication, &Expr::CInt(f), &Expr::CInt(s)) => {
-                        Expr::CInt(f.wrapping_mul(s))
-                    }
-                    (TokenKind::Division, &Expr::CInt(f), &Expr::CInt(s)) => {
-                        Expr::CInt(f.wrapping_div(s))
-                    }
-                    (TokenKind::KMod, &Expr::CInt(f), &Expr::CInt(s)) => {
-                        Expr::CInt(f.wrapping_rem(s))
-                    }
-                    _ => Expr::Binary(t, Some(x.bx()), Some(y.bx())),
-                }
-            }
-            Expr::Negation(Some(a)) => {
-                let x = Expr::reduce(*a);
-                match &x {
-                    Expr::CBool(t) => Expr::CBool(!t),
-                    _ => Expr::Negation(Some(x.bx())),
-                }
-            }
-            Expr::Comparison(t, Some(a), Some(b)) => {
-                let x = Expr::reduce(*a);
-                let y = Expr::reduce(*b);
-                match (&t, &x, &y) {
-                    (TokenKind::Less, &Expr::CBool(f), &Expr::CBool(s)) => Expr::CBool(f < s),
-                    (TokenKind::LessOrEqual, &Expr::CBool(f), &Expr::CBool(s)) => {
-                        Expr::CBool(f <= s)
-                    }
-                    (TokenKind::Equal, &Expr::CBool(f), &Expr::CBool(s)) => Expr::CBool(f == s),
-                    (TokenKind::NotEqual, &Expr::CBool(f), &Expr::CBool(s)) => Expr::CBool(f != s),
-                    (TokenKind::Great, &Expr::CBool(f), &Expr::CBool(s)) => Expr::CBool(f > s),
-                    (TokenKind::GreatOrEqual, &Expr::CBool(f), &Expr::CBool(s)) => {
-                        Expr::CBool(f >= s)
-                    }
-
-                    (TokenKind::Less, &Expr::CInt(f), &Expr::CInt(s)) => Expr::CBool(f < s),
-                    (TokenKind::LessOrEqual, &Expr::CInt(f), &Expr::CInt(s)) => Expr::CBool(f <= s),
-                    (TokenKind::Equal, &Expr::CInt(f), &Expr::CInt(s)) => Expr::CBool(f == s),
-                    (TokenKind::NotEqual, &Expr::CInt(f), &Expr::CInt(s)) => Expr::CBool(f != s),
-                    (TokenKind::Great, &Expr::CInt(f), &Expr::CInt(s)) => Expr::CBool(f > s),
-                    (TokenKind::GreatOrEqual, &Expr::CInt(f), &Expr::CInt(s)) => {
-                        Expr::CBool(f >= s)
-                    }
-
-                    (TokenKind::Less, &Expr::CChar(f), &Expr::CChar(s)) => Expr::CBool(f < s),
-                    (TokenKind::LessOrEqual, &Expr::CChar(f), &Expr::CChar(s)) => {
-                        Expr::CBool(f <= s)
-                    }
-                    (TokenKind::Equal, &Expr::CChar(f), &Expr::CChar(s)) => Expr::CBool(f == s),
-                    (TokenKind::NotEqual, &Expr::CChar(f), &Expr::CChar(s)) => Expr::CBool(f != s),
-                    (TokenKind::Great, &Expr::CChar(f), &Expr::CChar(s)) => Expr::CBool(f > s),
-                    (TokenKind::GreatOrEqual, &Expr::CChar(f), &Expr::CChar(s)) => {
-                        Expr::CBool(f >= s)
-                    }
-
-                    _ => Expr::Comparison(t, Some(x.bx()), Some(y.bx())),
-                }
-            }
-            Expr::Logical(t, Some(a), Some(b)) => {
-                let x = Expr::reduce(*a);
-                let y = Expr::reduce(*b);
-                match (&t, &x, &y) {
-                    (TokenKind::KAnd, &Expr::CBool(f), &Expr::CBool(s)) => Expr::CBool(f && s),
-                    (TokenKind::KOr, &Expr::CBool(f), &Expr::CBool(s)) => Expr::CBool(f || s),
-                    _ => Expr::Comparison(t, Some(x.bx()), Some(y.bx())),
-                }
-            }
-
-            // Incase the expression is not reducable the just return it
-            e => e,
         }
     }
 
@@ -478,15 +385,12 @@ impl Expr {
                         ));
                     }
                     parser.advance_token();
-                    let a = Expr::reduce(*r);
-                    return Ok(a);
+                    return Ok(*r);
                 }
                 TokenKind::Empty => {
-                    if result.is_some() {
-                        let r = result.unwrap();
+                    if let Some(r) = result {
                         if r.is_valid() {
-                            let a = Expr::reduce(*r);
-                            return Ok(a);
+                            return Ok(*r);
                         } else {
                             return Err(Error::with_message(
                                 parser.column,
@@ -505,25 +409,24 @@ impl Expr {
                     }
                 }
                 TokenKind::KNil => {
-                    if result.is_none() {
-                        parser.advance_token();
-                        Expr::CNil
-                    } else {
+                    if let Some(r) = result {
                         return Err(Error::with_message(
                             parser.column,
                             parser.line,
-                            &format!("nil shouldn't follow {:?}", result.unwrap()),
+                            &format!("nil shouldn't follow {:?}", r),
                             "Expr",
                         ));
+                    } else {
+                        parser.advance_token();
+                        Expr::CNil
                     }
                 }
                 TokenKind::KNilQ => {
                     if parser.advance_token().get_kind() == TokenKind::LParenthesis {
                         // parser.get_token();
                         let s = Expr::generate(parser, symbol_table, is_paranthesis)?;
-                        match s {
-                            Expr::CNil => return Ok(Expr::CBool(true)),
-                            _ => (),
+                        if let Expr::CNil = s {
+                            return Ok(Expr::CBool(true));
                         }
                         match s.get_type() {
                             TypeDecl::List(_) => Expr::NilCheck(s.bx()),
@@ -549,16 +452,13 @@ impl Expr {
                     if parser.advance_token().get_kind() == TokenKind::LParenthesis {
                         // parser.get_token();
                         let s = Expr::generate(parser, symbol_table, is_paranthesis)?;
-                        match s {
-                            Expr::CNil => {
-                                return Err(Error::with_message(
-                                    parser.column,
-                                    parser.line,
-                                    "cannot get the head of empty list",
-                                    "Expr",
-                                ))
-                            }
-                            _ => (),
+                        if let Expr::CNil = s {
+                            return Err(Error::with_message(
+                                parser.column,
+                                parser.line,
+                                "cannot get the head of empty list",
+                                "Expr",
+                            ));
                         }
                         match s.get_type() {
                             TypeDecl::List(t) => Expr::Head(*t, s.bx()),
@@ -584,16 +484,13 @@ impl Expr {
                     if parser.advance_token().get_kind() == TokenKind::LParenthesis {
                         // parser.get_token();
                         let s = Expr::generate(parser, symbol_table, is_paranthesis)?;
-                        match s {
-                            Expr::CNil => {
-                                return Err(Error::with_message(
-                                    parser.column,
-                                    parser.line,
-                                    "cannot get the tail of empty list",
-                                    "Expr",
-                                ))
-                            }
-                            _ => (),
+                        if let Expr::CNil = s {
+                            return Err(Error::with_message(
+                                parser.column,
+                                parser.line,
+                                "cannot get the tail of empty list",
+                                "Expr",
+                            ));
                         }
                         match s.get_type() {
                             TypeDecl::List(t) => Expr::Tail(TypeDecl::List(t), s.bx()),
@@ -634,8 +531,7 @@ impl Expr {
                     }
                 }
                 TokenKind::Hash => {
-                    if result.is_some() {
-                        let head = result.unwrap();
+                    if let Some(head) = result {
                         if head.is_valid() {
                             parser.advance_token();
                             let tail = Expr::generate(parser, symbol_table, is_paranthesis)?;
@@ -701,11 +597,9 @@ impl Expr {
                 }
             }
         }
-        if result.is_some() {
-            let r = result.unwrap();
+        if let Some(r) = result {
             if r.is_valid() {
-                let a = Expr::reduce(*r);
-                Ok(a)
+                Ok(*r)
             } else {
                 Err(Error::with_message(
                     parser.column,

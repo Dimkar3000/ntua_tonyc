@@ -1,0 +1,15 @@
+def main():
+    list[int] i
+    def list[int] test():
+        list[int] j
+        j := 1 # nil
+        j := 3 # j
+        j := 5 # j
+        j := 6 # j
+        j := 8 # j
+        return j    
+    end
+    i := test()
+    puti(head(i))
+    puts("\nsegfault\n")
+end

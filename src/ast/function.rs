@@ -104,8 +104,9 @@ impl FuncDecl {
                         "Ast",
                     ));
                 }
-                let args = FormalDecl::generate(parser, symbol_table)?;
                 let a = symbol_table.insert(&name, t.clone());
+                symbol_table.open_scope(&name);
+                let args = FormalDecl::generate(parser, symbol_table)?;
                 match a {
                     Ok(()) => (),
                     Err(e) => {
@@ -117,9 +118,10 @@ impl FuncDecl {
                         ))
                     }
                 }
+                symbol_table.close_scope();
                 Ok(FuncDecl {
                     rtype: t,
-                    name: name.to_owned(),
+                    name,
                     arguments: args,
                 })
             }
@@ -238,7 +240,7 @@ impl FuncDef {
                 Ok(FuncDef {
                     header: FuncDecl {
                         rtype: t,
-                        name: name.to_owned(),
+                        name,
                         arguments: args,
                     },
                     decls,

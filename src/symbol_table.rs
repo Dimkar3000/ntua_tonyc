@@ -79,6 +79,15 @@ impl<T: Debug + Clone> SymbolTable<T> {
         }
     }
 
+    /// Check if an item with the same name exists on the current scope
+    pub fn in_current_scope(&self, name: &str) -> bool {
+        if self.scopes.is_empty() {
+            return false;
+        }
+        // println!("{:?}", self.scopes.last());
+        self.scopes.last().unwrap().lookup(name).is_some()
+    }
+
     /// Appends a new scopes object to the list
     pub fn open_scope<S: AsRef<str>>(&mut self, name: S) {
         // The name of the scope will be the function name
