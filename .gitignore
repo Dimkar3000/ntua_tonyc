@@ -12,3 +12,4 @@ gcmt*
 **/*.imm
 **/*.o
 **/*.exe
+Cargo.lock

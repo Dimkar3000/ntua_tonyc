@@ -54,9 +54,9 @@ impl<'ctx> CodeGen<'ctx> {
     fn typed_size_of(&self, ctype: &BasicTypeEnum<'ctx>) -> Option<IntValue<'ctx>> {
         match &ctype {
             BasicTypeEnum::ArrayType(v) => v.size_of(),
-            BasicTypeEnum::IntType(v) => Some(v.size_of()),
-            BasicTypeEnum::FloatType(v) => Some(v.size_of()),
-            BasicTypeEnum::PointerType(v) => Some(v.size_of()),
+            BasicTypeEnum::IntType(v) => v.size_of(),
+            BasicTypeEnum::FloatType(v) => v.size_of(),
+            BasicTypeEnum::PointerType(v) => v.size_of(),
             BasicTypeEnum::StructType(v) => v.size_of(),
             BasicTypeEnum::VectorType(v) => v.size_of(),
         }
@@ -74,8 +74,8 @@ impl<'ctx> CodeGen<'ctx> {
             TypeDecl::Nil => self.context.opaque_struct_type("nill").into(),
             TypeDecl::List(t) => {
                 let type_name = format!("list_{}", self.typdecl_str(t));
-                match self.module.get_type(&type_name) {
-                    Some(k) => k,
+                match self.module.get_struct_type(&type_name) {
+                    Some(k) => k.into(),
                     None => {
                         let data = self.typedecl_to_type(t);
                         let node = self.context.opaque_struct_type(&type_name);
@@ -911,10 +911,10 @@ impl<'ctx> CodeGen<'ctx> {
             Expr::Head(_t, exp) => {
                 let list = self.compile_exp(exp, true);
                 assert!(list.is_pointer_value());
-                let element = unsafe {
-                    self.builder
-                        .build_struct_gep(list.into_pointer_value(), 0, "head_ptr")
-                };
+                let element = self
+                    .builder
+                    .build_struct_gep(list.into_pointer_value(), 0, "head_ptr")
+                    .unwrap();
                 self.builder.build_load(element, "head")
             }
             Expr::CNil => self
