@@ -216,6 +216,7 @@ impl Stmt {
                     Expr::CBool(..)
                     | Expr::Atomic(TypeDecl::Bool, _)
                     | Expr::Comparison(..)
+                    | Expr::Logical(..)
                     | Expr::Negation(..)
                     | Expr::NilCheck(..) => (),
                     e => {
@@ -257,7 +258,7 @@ impl Stmt {
                     parser.advance_token();
                     let cond = Expr::generate(parser, symbol_table, false)?;
                     match cond {
-                        Expr::Comparison(..) | Expr::Negation(..) | Expr::NilCheck(..) | Expr::CBool(..) => (),
+                        Expr::Comparison(..) | Expr::Negation(..) | Expr::NilCheck(..) | Expr::CBool(..) | Expr::Logical(..) | Expr::Atomic(..) => () ,
                         e => return Err(Error::with_message(parser.column, parser.line, &format!("condition of elsif statement should reduce to bool but instead got: {:?}",e),"Ast")),
                     }
                     match parser.read_token().get_kind() {

@@ -14,6 +14,7 @@ use inkwell::module::Module;
 use inkwell::IntPredicate;
 
 use crate::ast::*;
+use inkwell::attributes::AttributeLoc;
 use inkwell::module::Linkage;
 use inkwell::passes::*;
 use inkwell::targets::*;
@@ -100,16 +101,36 @@ impl<'ctx> CodeGen<'ctx> {
         &mut self,
         name: &str,
         ftype: FunctionType<'ctx>,
+        context: &Context,
+        ref_list: Vec<bool>,
     ) -> Result<FunctionValue<'ctx>, String> {
         if self.function_table.in_current_scope("name") {
             Err("function with the same name already exists".to_owned())
         } else if self.function_table.lookup(name).is_some() {
             let lname = format!("{}_{}", name, random_sub_str());
             let f = self.module.add_function(&lname, ftype, None);
+            for i in 0..ref_list.len() {
+                f.add_attribute(
+                    AttributeLoc::Param(i as u32),
+                    context.create_string_attribute(
+                        "is_ref",
+                        if ref_list[i] { "true" } else { "false" },
+                    ),
+                )
+            }
             self.function_table.insert(name, f)?;
             Ok(f)
         } else {
             let f = self.module.add_function(name, ftype, None);
+            for i in 0..ref_list.len() {
+                f.add_attribute(
+                    AttributeLoc::Param(i as u32),
+                    context.create_string_attribute(
+                        "is_ref",
+                        if ref_list[i] { "true" } else { "false" },
+                    ),
+                )
+            }
             self.function_table.insert(name, f)?;
             Ok(f)
         }
@@ -256,7 +277,7 @@ impl<'ctx> CodeGen<'ctx> {
             main.header.name = "main_2".to_owned();
         };
         // Create Code
-        self.compile_func(&main)?;
+        self.compile_func(self.context, &main)?;
         // Fill wrapper
         let callee = self.module.get_function(&main.header.name).unwrap();
         self.builder.position_at_end(entry_block);
@@ -379,13 +400,14 @@ impl<'ctx> CodeGen<'ctx> {
     // Sub compilations
 
     // Func
-    fn compile_func(&mut self, func: &FuncDef) -> Result<(), String> {
+    fn compile_func(&mut self, context: &Context, func: &FuncDef) -> Result<(), String> {
         // Function Signature
         let ctype = self.func_to_function_type(&func);
         let function = if self.function_table.in_current_scope(&func.header.name) {
             *self.function_table.lookup(&func.header.name).unwrap()
         } else {
-            self.store_function(&func.header.name, ctype)?
+            let ref_list = func.header.arguments.iter().map(|x| x.is_ref).collect();
+            self.store_function(&func.header.name, ctype, context, ref_list)?
         };
         self.function_table.open_scope(&func.header.name);
         let entry_block = self
@@ -419,14 +441,16 @@ impl<'ctx> CodeGen<'ctx> {
         }
         // Create llvm function for all defs and decls
         for i in &func.defs {
+            let ref_list = i.header.arguments.iter().map(|x| x.is_ref).collect();
             let ftype = self.func_to_function_type(i);
-            self.store_function(&i.header.name, ftype)?;
+            self.store_function(&i.header.name, ftype, context, ref_list)?;
         }
 
         for i in &func.decls {
             if !self.function_table.in_current_scope(&i.name) {
+                let ref_list = i.arguments.iter().map(|x| x.is_ref).collect();
                 let ftype = self.funcdecl_to_function_type(i);
-                self.store_function(&i.name, ftype)?;
+                self.store_function(&i.name, ftype, context, ref_list)?;
             }
         }
 
@@ -457,7 +481,7 @@ impl<'ctx> CodeGen<'ctx> {
 
         // Compile Function definitions
         for i in &func.defs {
-            self.compile_func(i)?;
+            self.compile_func(context, i)?;
         }
         self.function_table.close_scope();
         Ok(())
@@ -616,7 +640,7 @@ impl<'ctx> CodeGen<'ctx> {
                 }
                 self.builder.position_at_end(for_exit);
             }
-            Stmt::Skip => eprintln!("skip statement found, test what happended"),
+            Stmt::Skip => (/* Skip does nothing so no code is generated*/),
             Stmt::Call(name, args) => {
                 let function = *self.function_table.lookup(name).unwrap();
                 let mut v = Vec::new();
@@ -718,7 +742,13 @@ impl<'ctx> CodeGen<'ctx> {
                     .expect("function call failed to find function");
                 let mut v = Vec::new();
                 for (i, arg) in args.iter().enumerate() {
-                    let r = self.compile_exp(&arg, false);
+                    let is_ref = match function
+                        .get_string_attribute(AttributeLoc::Param(i as u32), "is_ref")
+                    {
+                        Some(v) => v.get_string_value().to_str().unwrap_or("false") == "true",
+                        None => false,
+                    };
+                    let r = self.compile_exp(&arg, is_ref);
                     if r.is_pointer_value()
                         && r.into_pointer_value().is_null()
                         && r.into_pointer_value().is_const()
