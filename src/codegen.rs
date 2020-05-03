@@ -241,7 +241,7 @@ impl<'ctx> CodeGen<'ctx> {
         if let Err(e) = main {
             return Err(format!("{}", e));
         }
-        let main = main.unwrap();
+        let mut main = main.unwrap();
         if !main.header.arguments.is_empty() || main.header.rtype != TypeDecl::Void {
             return Err("Top level Function shouldn't have argument or a return type".to_owned());
         }
@@ -251,7 +251,10 @@ impl<'ctx> CodeGen<'ctx> {
             .module
             .add_function("main", self.context.i32_type().fn_type(&[], false), None);
         let entry_block = self.context.append_basic_block(f, "main_entry");
-
+        // self.function_table.insert("main", f).unwrap();
+        if main.header.name == "main" {
+            main.header.name = "main_2".to_owned();
+        };
         // Create Code
         self.compile_func(&main)?;
         // Fill wrapper
