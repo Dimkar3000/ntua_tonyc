@@ -62,11 +62,11 @@ impl Display for Expr {
             Expr::Negation(Some(a)) => write!(f, "(not {})", a),
             Expr::NilCheck(a) => write!(f, "nil? {}", a),
             Expr::CNil => write!(f, "nil"),
-            Expr::NewArray(t, a) => write!(f, "new {:?}[{}]", t, a),
+            Expr::NewArray(t, a) => write!(f, "new {}[{}]", t, a),
             Expr::Hash(_, a, b) => write!(f, "({}#{})", a, b), // list creation head # tai => write!(f,"{}")l
             Expr::Head(_, a) => write!(f, "head({})", a),
             Expr::Tail(_, a) => write!(f, "tail({})", a),
-            e => panic!("tryed to print invalid expression: {:?}", e),
+            e => panic!("tryed to print invalid expression: {}", e),
         }
         .unwrap();
         write!(f, ")")
@@ -360,7 +360,7 @@ impl Expr {
                         return Err(Error::with_message(
                             parser.column,
                             parser.line,
-                            &format!("Invalid Expression followed by RBracket: {:?}", r),
+                            &format!("Invalid Expression followed by RBracket: {}", r),
                             "Expr",
                         ));
                     }
@@ -380,7 +380,7 @@ impl Expr {
                         return Err(Error::with_message(
                             parser.column,
                             parser.line,
-                            &format!("Invalid Expression inside parenthesis: {:?}", r),
+                            &format!("Invalid Expression inside parenthesis: {}", r),
                             "Expr",
                         ));
                     }
@@ -413,7 +413,7 @@ impl Expr {
                         return Err(Error::with_message(
                             parser.column,
                             parser.line,
-                            &format!("nil shouldn't follow {:?}", r),
+                            &format!("nil shouldn't follow {}", r),
                             "Expr",
                         ));
                     } else {
@@ -434,7 +434,7 @@ impl Expr {
                                 return Err(Error::with_message(
                                     parser.column,
                                     parser.line,
-                                    &format!("nil shouldn't follow {:?} h", e),
+                                    &format!("nil shouldn't follow {} h", e),
                                     "Expr",
                                 ))
                             }
@@ -466,7 +466,7 @@ impl Expr {
                                 return Err(Error::with_message(
                                     parser.column,
                                     parser.line,
-                                    &format!("nil shouldn't follow {:?} h", e),
+                                    &format!("nil shouldn't follow {} h", e),
                                     "Expr",
                                 ))
                             }
@@ -498,7 +498,7 @@ impl Expr {
                                 return Err(Error::with_message(
                                     parser.column,
                                     parser.line,
-                                    &format!("nil shouldn't follow {:?} h", e),
+                                    &format!("nil shouldn't follow {} h", e),
                                     "Expr",
                                 ))
                             }
@@ -552,7 +552,7 @@ impl Expr {
                                     return Err(Error::with_message(
                                         parser.column,
                                         parser.line,
-                                        &format!("Invalid hash expration: {:?} # {:?}", head, tail),
+                                        &format!("Invalid hash expration: {} # {}", head, tail),
                                         "Expr",
                                     ))
                                 }
@@ -575,11 +575,19 @@ impl Expr {
                         ));
                     }
                 }
+                TokenKind::Error => {
+                    return Err(Error::with_message(
+                        parser.column,
+                        parser.line,
+                        &token.get_error().unwrap(),
+                        "Parser",
+                    ));
+                }
                 e if result.is_none() => {
                     return Err(Error::with_message(
                         parser.column,
                         parser.line,
-                        &format!("unexpected token: {:?}", e),
+                        &format!("unexpected token: {}", e),
                         "Expr",
                     ))
                 }

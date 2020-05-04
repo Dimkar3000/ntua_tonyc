@@ -65,7 +65,7 @@ impl VarDef {
                         return Err(Error::with_message(
                             parser.column,
                             parser.line,
-                            &format!("Expected name definition, found \"{:?}\"", e),
+                            &format!("Expected name definition, found \"{}\"", e),
                             "Ast",
                         ))
                     }

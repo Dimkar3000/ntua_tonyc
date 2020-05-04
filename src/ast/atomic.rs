@@ -28,7 +28,7 @@ impl Display for Atomic {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
         match self {
             Atomic::Name(_, n) => write!(f, "(atom {})", n),
-            Atomic::CString(s) => write!(f, "(atom {:?})", s),
+            Atomic::CString(s) => write!(f, "(atom {})", s),
             Atomic::Accessor(a, e) => write!(f, "(atom {}[{}])", a, e),
             Atomic::FuncCall(_, n, exp) => {
                 write!(f, "(atom {}(", n).unwrap();
@@ -163,7 +163,7 @@ impl Atomic {
                 return Err(Error::with_message(
                     parser.column,
                     parser.line,
-                    &format!("atomic failed to consume token: {:?}", e),
+                    &format!("atomic failed to consume token: {}", e),
                     "Ast",
                 ))
             }
@@ -183,7 +183,7 @@ impl Atomic {
                             parser.column,
                             parser.line,
                             &format!(
-                                "expression inside bracket should reduce to intiger, but {:?}",
+                                "expression inside bracket should reduce to intiger, but {}",
                                 e
                             ),
                             "Ast",
@@ -199,7 +199,7 @@ impl Atomic {
                     e => Err(Error::with_message(
                         parser.column,
                         parser.line,
-                        &format!("Ast; right bracket missing: {:?}", e),
+                        &format!("Ast; right bracket missing: {}", e),
                         "Ast",
                     )),
                 }

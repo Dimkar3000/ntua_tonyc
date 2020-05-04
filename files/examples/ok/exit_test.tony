@@ -1,0 +1,10 @@
+def test():
+    int i
+    i := 2
+    if i > 1:
+        exit
+    elsif i < 0:
+        puts("t")
+        exit
+    end
+end

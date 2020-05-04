@@ -6,7 +6,7 @@ pub enum TokenExtra<'a> {
     None,
     /// CString is a String object because the content is not a copy of the original due to the escaped characters
     CString(String),
-    Error(&'a str),
+    Error(String),
     Name(&'a str),
     Comment(usize, usize),
     Cchar(char),
@@ -60,9 +60,9 @@ impl<'a> Token<'a> {
             Err(())
         }
     }
-    pub fn get_error(&self) -> Result<&'a str, ()> {
-        if let TokenExtra::Error(s) = self.extra {
-            Ok(s)
+    pub fn get_error(&self) -> Result<String, ()> {
+        if let TokenExtra::Error(s) = self.extra.clone() {
+            Ok(s.clone())
         } else {
             Err(())
         }
@@ -96,12 +96,12 @@ impl<'a> Token<'a> {
         }
     }
 
-    pub fn make_error(column: usize, line: usize, _message: &str) -> Self {
+    pub fn make_error<T: AsRef<str>>(column: usize, line: usize, message: T) -> Self {
         Token {
             kind: TokenKind::Error,
             column,
             line,
-            extra: TokenExtra::None,
+            extra: TokenExtra::Error(message.as_ref().to_owned()),
         }
     }
 
@@ -117,7 +117,7 @@ impl<'a> Token<'a> {
                 kind: TokenKind::Error,
                 column,
                 line,
-                extra: TokenExtra::Error("Parser: Int overflow"),
+                extra: TokenExtra::Error("Parser: Int overflow".to_owned()),
             },
         }
     }

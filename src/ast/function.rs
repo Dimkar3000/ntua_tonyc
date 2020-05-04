@@ -72,7 +72,7 @@ impl FuncDecl {
                         return Err(Error::with_message(
                             parser.column,
                             parser.line,
-                            &format!("Wrong token in Function definition: {:?}", e),
+                            &format!("Wrong token in Function definition: {}", e),
                             "Ast",
                         ))
                     }
@@ -91,7 +91,7 @@ impl FuncDecl {
                         return Err(Error::with_message(
                             parser.column,
                             parser.line,
-                            &format!("Wrong token in Function definition: {:?}", e),
+                            &format!("Wrong token in Function definition: {}", e),
                             "Ast",
                         ))
                     }
@@ -128,7 +128,7 @@ impl FuncDecl {
             e => Err(Error::with_message(
                 parser.column,
                 parser.line,
-                &format!("failed to find function decl: {:?}", e),
+                &format!("failed to find function decl: {}", e),
                 "Ast",
             )),
         }
@@ -151,7 +151,7 @@ impl FuncDef {
                         return Err(Error::with_message(
                             parser.column,
                             parser.line,
-                            &format!("Wrong token in Function definition: {:?}", e),
+                            &format!("Wrong token in Function definition: {}", e),
                             "Ast",
                         ))
                     }
@@ -170,12 +170,12 @@ impl FuncDef {
                         return Err(Error::with_message(
                             parser.column,
                             parser.line,
-                            &format!("Wrong token in Function definition: {:?}", e),
+                            &format!("Wrong token in Function definition: {}", e),
                             "Ast",
                         ))
                     }
                 };
-                // println!("{:?}", symbol_table);
+                // println!("{}", symbol_table);
                 let _ = symbol_table.insert(&name, t.clone());
                 symbol_table.open_scope(&name);
                 if parser.read_token().get_kind() != TokenKind::LParenthesis {
@@ -194,7 +194,7 @@ impl FuncDef {
                         return Err(Error::with_message(
                             parser.column,
                             parser.line,
-                            &format!("Function Definition end with colon, but got: {:?}", e),
+                            &format!("Function Definition end with colon, but got: {}", e),
                             "Ast",
                         ))
                     }
@@ -270,7 +270,7 @@ impl FormalDecl {
                     parser.column,
                     parser.line,
                     &format!(
-                        "formal definitions start with parenthesis but I was given: {:?}",
+                        "formal definitions start with parenthesis but I was given: {}",
                         e
                     ),
                     "Ast",
@@ -310,7 +310,7 @@ impl FormalDecl {
                     return Err(Error::with_message(
                         parser.column,
                         parser.line,
-                        &format!("unxpected token: {:?}", e),
+                        &format!("unxpected token: {}", e),
                         "Ast",
                     ))
                 }

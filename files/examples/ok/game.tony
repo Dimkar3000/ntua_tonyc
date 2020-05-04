@@ -1,4 +1,4 @@
-def main():
+def t():
     def bool winner(ref char[] board):
         if board[0] = board[1] and board[1] = board[2] and board[0] <> ' ':
             return true
@@ -30,23 +30,24 @@ def main():
     end
     def int get_move(char current; ref char[] board):
         int i
-        puts("Player '")
+        char d
+        puts("Player \'")
         putc(current)
-        puts("' choose square (1-9): ")
+        puts("\' choose square (1-9): ")
         i:= geti() - 1
         for skip;true;skip:
             if i < 9 and board[i] = ' ':
-                exit
+                puts("You chose the cell: (")
+                puti(i / 3)
+                puts(", ")
+                puti(i mod 3)
+                puts(")\n")
+                return i
             end
-            puts("You gave wrong number, try again: ")
+            d := getc()
+            puts("\nYou gave wrong number, try again: ")
             i:= geti() - 1
         end
-        puts("You chose the cell: (")
-        puti(i / 3)
-        puts(", ")
-        puti(i mod 3)
-        puts(")\n")
-        return i
     end
 
     def switch(ref char current):
@@ -73,7 +74,7 @@ def main():
         puts("\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n")
     end
     char[] board
-    char current
+    char current, d
     bool win
     int i
 
@@ -86,7 +87,7 @@ def main():
 
     clear_screen()
     puts("Welcome To the game, press enter to start")
-    getc()
+    d := getc()
     for skip;true;skip:
         clear_screen()
         print_board(board)
@@ -95,9 +96,9 @@ def main():
         if winner(board):
             clear_screen()
             print_board(board)
-            puts("Player '")
+            puts("Player \'")
             putc(current)
-            puts("' Won!!!\n")
+            puts("\' Won!!!\n")
             exit
         elsif ended(board):
             puts("Game was a draw\n")

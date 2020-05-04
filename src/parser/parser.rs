@@ -44,10 +44,9 @@ impl<'a> Parser<'a> {
     /// **Ok**: the character read
     ///
     /// **Err**: the error token to return
-    pub fn read_char(&mut self) -> Result<char, Token<'a>> {
+    pub fn read_char(&mut self, is_string: bool) -> Result<char, Token<'a>> {
         let mut chr = self.stream[self.index..].chars().peekable();
         let start = self.index;
-
         // check that there is smething after the first tick
         self.index += 1;
         self.column += 1;
@@ -94,6 +93,11 @@ impl<'a> Parser<'a> {
                     ))
                 }
             } // Escaped character should look to the next character,
+            Some('\'') if is_string => Err(Token::make_error(
+                self.column,
+                self.line,
+                &"Failed to Parse Character. Single Quote without backsplash",
+            )),
             Some(e) => Ok(e),
             // Some(e) => Token::Char(e), // General, not escaped character
             None => Err(Token::make_error(
@@ -187,16 +191,16 @@ impl<'a> Parser<'a> {
                     self.index += 1;
                     let o_column = self.column;
                     self.column += 1;
-                    self.token = match self.read_char() {
+                    self.token = match self.read_char(false) {
                         Ok(c) => {
-                            let c0 = self.read_char();
+                            let c0 = self.read_char(false);
                             self.index -= 1; // Note(dimkar): this reset the index back because there is a global +1 at the end of next token and it will skip the next token
                             match c0 {
                                 Ok('\'') => Token::make_cchar(o_column, self.line, c),
                                 Ok(e) => Token::make_error(
                                     self.column,
                                     self.line,
-                                    &format!(
+                                    format!(
                                         "Invalid character, Expected \"\'\" but got: \"{}\"",
                                         e
                                     ),
@@ -213,24 +217,20 @@ impl<'a> Parser<'a> {
                     self.index += 1;
                     self.column += 1;
                     let mut result = String::new();
-                    let mut c = self.read_char();
+                    let mut c = self.read_char(true);
                     while c.is_ok() {
                         // println!("parser: {}", result);
                         if &self.stream[self.index..self.index + 1] == "\"" {
                             result.push(c.unwrap());
-                            c = self.read_char();
+                            c = self.read_char(true);
                             break;
                         }
                         result.push(c.unwrap());
-                        c = self.read_char();
+                        c = self.read_char(true);
                     }
                     self.index -= 1; // Note(dimkar): this reset the index back because there is a global +1 at the end of next token and it will skip the next token
                     self.token = match c {
-                        Err(e) => Token::make_error(
-                            o_column,
-                            self.line,
-                            &format!("Failed to parser String: Underline error: {}", e),
-                        ),
+                        Err(e) => Token::make_error(o_column, self.line, &e.get_error().unwrap()),
                         Ok('\"') => Token::make_cstring(self.column, self.line, result),
                         Ok(e) => unreachable!("this should never happen {}", e),
                     };

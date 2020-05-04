@@ -92,14 +92,15 @@ impl Stmt {
 
                         let expr = Expr::generate(parser, symbol_table, false)?;
                         if atom.get_type() != expr.get_type()  {
-                            return Err(Error::with_message(parser.column, parser.line, &format!("Assigment requires that the variable is the same type as the expression, but {:?}:={:?}",atom.get_type(),expr.get_type()),"Ast"));
+                            return Err(Error::with_message(parser.column, parser.line, &format!("Assigment requires that the variable is the same type as the expression, but {}:={}",atom.get_type(),expr.get_type()),"Ast"));
                         }
                         Ok(Stmt::Assign(atom,expr))
                     },
                     _ => {
                         match atom {
-                            Atomic::FuncCall(_,n,a) => Ok(Stmt::Call(n,a)),
-                            e => Err(Error::with_message(parser.column, parser.line, &format!("An atomic expression is not a stmt unless it is a call, here it was: {:?}",e),"Ast"))   
+                            Atomic::FuncCall(TypeDecl::Void,n,a) => Ok(Stmt::Call(n,a)),
+                            Atomic::FuncCall(_,n,_) => Err(Error::with_message(parser.column, parser.line, &format!("Function {} doesn't return void",n),"Ast")),  
+                            e => Err(Error::with_message(parser.column, parser.line, &format!("An atomic expression is not a stmt unless it is a call that returns void, here it was: {}",e),"Ast"))   
                         }
                     }
                 }
@@ -131,7 +132,7 @@ impl Stmt {
                             return Err(Error::with_message(
                                 parser.column,
                                 parser.line,
-                                &format!("Expected simple Statement but got: {:?}", e),
+                                &format!("Expected simple Statement but got: {}", e),
                                 "Ast",
                             ))
                         }
@@ -147,7 +148,7 @@ impl Stmt {
                             return Err(Error::with_message(
                                 parser.column,
                                 parser.line,
-                                &format!("Expected \",\" or \";\" but got: {:?}", e),
+                                &format!("Expected \",\" or \";\" but got: {}", e),
                                 "Ast",
                             ))
                         }
@@ -156,7 +157,15 @@ impl Stmt {
                 parser.advance_token();
                 let cond = Expr::generate(parser, symbol_table, false)?;
                 if cond.get_type() != TypeDecl::Bool {
-                    return Err(Error::with_message(parser.column, parser.line, &format!("condition of For statement should reduce to bool but instead got: {:?}",cond),"Ast"));
+                    return Err(Error::with_message(
+                        parser.column,
+                        parser.line,
+                        &format!(
+                            "condition of For statement should reduce to bool but instead got: {}",
+                            cond
+                        ),
+                        "Ast",
+                    ));
                 }
                 match parser.read_token().get_kind() {
                     TokenKind::Semicolon => parser.advance_token(),
@@ -164,7 +173,7 @@ impl Stmt {
                         return Err(Error::with_message(
                             parser.column,
                             parser.line,
-                            &format!("Expected simple Statement but got: {:?}", e),
+                            &format!("Expected simple Statement but got: {}", e),
                             "Ast",
                         ))
                     }
@@ -178,7 +187,7 @@ impl Stmt {
                             return Err(Error::with_message(
                                 parser.column,
                                 parser.line,
-                                &format!("Expected simple Statement but got: {:?}", e),
+                                &format!("Expected simple Statement but got: {}", e),
                                 "Ast",
                             ))
                         }
@@ -194,7 +203,7 @@ impl Stmt {
                             return Err(Error::with_message(
                                 parser.column,
                                 parser.line,
-                                &format!("Expected \",\" or \":\" but got: {:?}", e),
+                                &format!("Expected \",\" or \":\" but got: {}", e),
                                 "Ast",
                             ))
                         }
@@ -224,7 +233,7 @@ impl Stmt {
                             parser.column,
                             parser.line,
                             &format!(
-                            "condition of If statement should reduce to bool but instead got: {:?}",
+                            "condition of If statement should reduce to bool but instead got: {}",
                             e
                         ),
                             "Ast",
@@ -240,7 +249,7 @@ impl Stmt {
                         return Err(Error::with_message(
                             parser.column,
                             parser.line,
-                            &format!("Expect Colon after If block's expression but got: {:?}", c),
+                            &format!("Expect Colon after If block's expression but got: {}", c),
                             "Ast",
                         ))
                     }
@@ -259,7 +268,7 @@ impl Stmt {
                     let cond = Expr::generate(parser, symbol_table, false)?;
                     match cond {
                         Expr::Comparison(..) | Expr::Negation(..) | Expr::NilCheck(..) | Expr::CBool(..) | Expr::Logical(..) | Expr::Atomic(..) => () ,
-                        e => return Err(Error::with_message(parser.column, parser.line, &format!("condition of elsif statement should reduce to bool but instead got: {:?}",e),"Ast")),
+                        e => return Err(Error::with_message(parser.column, parser.line, &format!("condition of elsif statement should reduce to bool but instead got: {}",e),"Ast")),
                     }
                     match parser.read_token().get_kind() {
                         TokenKind::Colon => (),
@@ -268,7 +277,7 @@ impl Stmt {
                                 parser.column,
                                 parser.line,
                                 &format!(
-                                    "Expect Colon after ElseIf block's expression but got: {:?}",
+                                    "Expect Colon after ElseIf block's expression but got: {}",
                                     c
                                 ),
                                 "Ast",
@@ -294,7 +303,7 @@ impl Stmt {
                             return Err(Error::with_message(
                                 parser.column,
                                 parser.line,
-                                &format!("Expect Colon after Else keyword but got: {:?}", c),
+                                &format!("Expect Colon after Else keyword but got: {}", c),
                                 "Ast",
                             ))
                         }
@@ -317,10 +326,9 @@ impl Stmt {
                 parser.column,
                 parser.line,
                 &format!(
-                    "Ast failed to parse statement: {:?} with extra; {:?}, pre:{:?}",
+                    "Ast failed to parse statement: {} with token {}",
                     e,
-                    parser.read_token(),
-                    parser.previous_token()
+                    parser.read_token()
                 ),
                 "Ast",
             )),

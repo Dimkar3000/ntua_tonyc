@@ -85,7 +85,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         &p,
     );
     if let Err(a) = a {
-        panic!("{}", a);
+        return Err(Box::new(a));
     }
     Ok(())
 }

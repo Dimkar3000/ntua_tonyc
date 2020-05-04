@@ -91,7 +91,7 @@ impl TypeDecl {
                 return Err(Error::with_message(
                     parser.column,
                     parser.line,
-                    &format!("Wrong type passed: \"{:?}\"", e),
+                    &format!("Wrong type passed: \"{}\"", e),
                     "Ast",
                 ))
             }
@@ -159,7 +159,7 @@ impl TypeDecl {
                 return Err(Error::with_message(
                     parser.column,
                     parser.line,
-                    &format!("Wrong type passed: \"{:?}\"", e),
+                    &format!("Wrong type passed: \"{}\"", e),
                     "Ast",
                 ))
             }

@@ -1,14 +1,36 @@
 use colored::*;
 use core::fmt::Display;
+use std::fmt::Debug;
 
 /// Error is a struct that helps generate error messages.
-#[derive(Debug)]
+// #[derive(Debug)]
 pub struct Error {
     giver: String,
     message: String,
     column: usize,
     line: usize,
     sub_error: Option<Box<Error>>,
+}
+
+impl Debug for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::result::Result<(), std::fmt::Error> {
+        write!(
+            f,
+            "{} {}{}{}{}{}{}",
+            self.giver.bright_red().on_black(),
+            "Error:(".bright_red().on_black(),
+            self.column.to_string().bright_green().on_black(),
+            ",".bright_red().on_black(),
+            self.line.to_string().bright_green().on_black(),
+            "): ".bright_red().on_black(),
+            self.message
+        )?;
+        if self.sub_error.is_some() {
+            write!(f, "\n\t{}", self.sub_error.as_ref().unwrap())
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl Display for Error {
@@ -29,6 +51,21 @@ impl Display for Error {
         } else {
             Ok(())
         }
+    }
+}
+
+impl<'a> std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self.sub_error.as_ref() {
+            Some(x) => Some(x),
+            None => None,
+        }
+    }
+}
+
+impl<'a, T: AsRef<str>> From<T> for Error {
+    fn from(t: T) -> Self {
+        Error::with_message(0, 0, t.as_ref(), "Codegen")
     }
 }
 

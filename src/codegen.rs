@@ -1,4 +1,5 @@
 use crate::ast::Expr;
+use crate::error::Error;
 use crate::parser::TokenKind;
 use crate::symbol_table::SymbolTable;
 
@@ -48,7 +49,7 @@ impl<'ctx> CodeGen<'ctx> {
             TypeDecl::Int => "i".to_owned(),
             TypeDecl::List(tmp) => format!("list_{}", self.typdecl_str(tmp)),
             TypeDecl::Array(tmp) => format!("array_{}", self.typdecl_str(tmp)),
-            e => panic!("called typdecl_str with: {:?}", e),
+            e => panic!("called typdecl_str with: {}", e),
         }
     }
 
@@ -93,7 +94,7 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                 }
             }
-            e => panic!("called typedecl_to_type with {:?}", e),
+            e => panic!("called typedecl_to_type with {}", e),
         }
     }
 
@@ -167,7 +168,7 @@ impl<'ctx> CodeGen<'ctx> {
 }
 
 impl<'ctx> CodeGen<'ctx> {
-    pub fn new(context: &'ctx Context, module: Module<'ctx>) -> Result<Self, String> {
+    pub fn new(context: &'ctx Context, module: Module<'ctx>) -> Result<Self, Error> {
         let mut std = SymbolTable::new();
         std.open_scope("root");
 
@@ -256,15 +257,20 @@ impl<'ctx> CodeGen<'ctx> {
         output_final: bool,
         optimize: bool,
         filename: &Path,
-    ) -> Result<(), String> {
+    ) -> Result<(), Error> {
         // Build Ast
         let main = ast.generate();
         if let Err(e) = main {
-            return Err(format!("{}", e));
+            return Err(e);
         }
         let mut main = main.unwrap();
         if !main.header.arguments.is_empty() || main.header.rtype != TypeDecl::Void {
-            return Err("Top level Function shouldn't have argument or a return type".to_owned());
+            return Err(Error::with_message(
+                0,
+                0,
+                "Top level Function shouldn't have argument or a return type",
+                "Codegen",
+            ));
         }
 
         // Create wrapper
@@ -274,7 +280,7 @@ impl<'ctx> CodeGen<'ctx> {
         let entry_block = self.context.append_basic_block(f, "main_entry");
         // self.function_table.insert("main", f).unwrap();
         if main.header.name == "main" {
-            main.header.name = "main_2".to_owned();
+            main.header.name = "main_".to_owned();
         };
         // Create Code
         self.compile_func(self.context, &main)?;
@@ -371,7 +377,7 @@ impl<'ctx> CodeGen<'ctx> {
         if !s.status.success() {
             let message = String::from_utf8(s.stderr).unwrap();
             print!("Compiling std failed");
-            return Err(message);
+            return Err(Error::with_message(0, 0, &message, "Codegen"));
         }
         println!("compiling {}", s.status);
         let ext = if cfg!(windows) { "exe" } else { "" };
@@ -391,7 +397,7 @@ impl<'ctx> CodeGen<'ctx> {
         if !r.status.success() {
             let message = String::from_utf8(r.stderr).unwrap();
             print!("Linking std failed");
-            return Err(message);
+            return Err(Error::with_message(0, 0, &message, "Codegen"));
         }
         println!("linking {}", s.status);
         Ok(())
@@ -498,7 +504,7 @@ impl<'ctx> CodeGen<'ctx> {
     ) -> bool {
         match stmt {
             Stmt::Exit => {
-                self.builder.build_unconditional_branch(exit_block);
+                self.builder.build_return(None);
                 *exited = true;
             }
             Stmt::Return(exp) => {
@@ -1000,26 +1006,26 @@ impl<'ctx> CodeGen<'ctx> {
                     TokenKind::Addition => BasicValueEnum::IntValue(self.builder.build_int_add(
                         x,
                         y,
-                        &format!("op_{:?}", t),
+                        &format!("op_{}", t),
                     )),
                     TokenKind::Subtraction => BasicValueEnum::IntValue(self.builder.build_int_sub(
                         x,
                         y,
-                        &format!("op_{:?}", t),
+                        &format!("op_{}", t),
                     )),
                     TokenKind::Multiplication => BasicValueEnum::IntValue(
-                        self.builder.build_int_mul(x, y, &format!("op_{:?}", t)),
+                        self.builder.build_int_mul(x, y, &format!("op_{}", t)),
                     ),
                     TokenKind::Division => BasicValueEnum::IntValue(
                         self.builder
-                            .build_int_signed_div(x, y, &format!("op_{:?}", t)),
+                            .build_int_signed_div(x, y, &format!("op_{}", t)),
                     ),
                     TokenKind::KMod => BasicValueEnum::IntValue(self.builder.build_int_signed_rem(
                         x,
                         y,
-                        &format!("op_{:?}", t),
+                        &format!("op_{}", t),
                     )),
-                    e => unreachable!("binary operation with token {:?}", e),
+                    e => unreachable!("binary operation with token {}", e),
                 }
             }
             Expr::Logical(t, x, y) => {
@@ -1034,7 +1040,7 @@ impl<'ctx> CodeGen<'ctx> {
                 } else if t == &TokenKind::KOr {
                     BasicValueEnum::IntValue(self.builder.build_or(x, y, "op_or"))
                 } else {
-                    unreachable!("logical expression with token: {:?}", t)
+                    unreachable!("logical expression with token: {}", t)
                 }
             }
             Expr::Negation(Some(t)) => {
@@ -1065,7 +1071,7 @@ impl<'ctx> CodeGen<'ctx> {
                 ))
             }
 
-            e => panic!("unhandle Expression: {:?}", e),
+            e => panic!("unhandle Expression: {}", e),
         }
     }
 }
