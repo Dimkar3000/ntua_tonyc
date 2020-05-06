@@ -13,5 +13,5 @@ gcmt*
 **/*.o
 **/*.exe
 Cargo.lock
-libgcmt.lib
+libgc*
 libtonystd.obj

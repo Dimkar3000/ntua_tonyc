@@ -369,20 +369,24 @@ impl<'ctx> CodeGen<'ctx> {
         /*****************
             Extra steps
         *****************/
-        let ext = if cfg!(windows) { "exe" } else { "" };
+        let ext = if cfg!(windows) { "exe" } else { "A" };
         // Compiling std and calling linker
-        let r = Command::new(if cfg!(windows) {
+        let name = if cfg!(windows) {
             "clink.bat"
         } else {
-            "clink.sh"
-        })
+            "sh"
+        };
+        let r = Command::new(name)
         .args(&[
+            if !cfg!(windows) {
+                "./clink.sh"
+            } else {""},
             final_path.with_extension("o").to_str().unwrap(),
             final_path.with_extension(ext).to_str().unwrap(),
         ])
         .output()
         .expect("failed to link");
-        // println!("{}", String::from_utf8(r.stdout).unwrap());
+         println!("{}", String::from_utf8(r.stdout).unwrap());
         if !r.status.success() {
             let message = String::from_utf8(r.stderr).unwrap();
             print!("Linking failed");
