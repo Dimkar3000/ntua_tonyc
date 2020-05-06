@@ -152,6 +152,8 @@ impl Expr {
         // All the cases possible some more
         match ((*left).clone(), right) {
             // Bool is valid on the left only when followed by a comparison operator
+            (Expr::Unary(TokenKind::Subtraction, None), Expr::CInt(n)) => Ok(Expr::CInt(-n)),
+            (Expr::Unary(TokenKind::Addition, None), Expr::CInt(n)) => Ok(Expr::CInt(n)),
             (
                 Expr::Comparison(t, Some(a), None),
                 Expr::Binary(TokenKind::Subtraction, None, None),

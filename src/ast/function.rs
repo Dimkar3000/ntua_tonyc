@@ -233,7 +233,27 @@ impl FuncDef {
                     }
                 }
                 while parser.read_token().get_kind() != TokenKind::KEnd {
-                    stmts.push(Stmt::generate(parser, symbol_table)?);
+                    let stmt = Stmt::generate(parser, symbol_table)?;
+                    match stmt {
+                        Stmt::Exit if t != TypeDecl::Void => {
+                            return Err(Error::with_message(
+                                parser.column,
+                                parser.line,
+                                "Exit statement if not valid in function that returns a value",
+                                "Ast",
+                            ))
+                        }
+                        Stmt::Return(..) if t == TypeDecl::Void => {
+                            return Err(Error::with_message(
+                                parser.column,
+                                parser.line,
+                                "Return statement if not valid in function that does not return a value",
+                                "Ast",
+                            ))
+                        }
+                        _ => (),
+                    }
+                    stmts.push(stmt);
                 }
                 parser.advance_token();
                 symbol_table.close_scope();

@@ -16,8 +16,15 @@ fn read_file(path: &str) -> Result<FuncDef, Error> {
 fn test_ok() {
     use std::fs;
     for entry in fs::read_dir("./files/examples/ok/").unwrap() {
-        println!("Testing: {:?}", entry);
         let entry = entry.unwrap().path();
+        let entry = entry.as_path();
+        if entry.is_dir()
+            || entry.extension().is_none()
+            || (entry.extension().is_some() && entry.extension().unwrap() != "tony")
+        {
+            continue;
+        }
+        println!("Testing: {:?}", entry);
         let p = entry.to_str().unwrap();
         let result = read_file(p);
         println!("{:?}", result);

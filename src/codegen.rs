@@ -369,37 +369,26 @@ impl<'ctx> CodeGen<'ctx> {
         /*****************
             Extra steps
         *****************/
-        // Build STD
-        let s = Command::new("clang++")
-            .args(&["-c", "-O3", "-o", "libtonystd.o", "libtonystd.cpp"])
-            .output()
-            .expect("failed");
-        if !s.status.success() {
-            let message = String::from_utf8(s.stderr).unwrap();
-            print!("Compiling std failed");
-            return Err(Error::with_message(0, 0, &message, "Codegen"));
-        }
-        println!("compiling {}", s.status);
         let ext = if cfg!(windows) { "exe" } else { "" };
-        // Linking STD
-        let r = Command::new("clang++")
-            .args(&[
-                "-O3",
-                final_path.with_extension("o").to_str().unwrap(),
-                "target/libtonystd.o",
-                "gcmt-lib.lib",
-                "-o",
-                final_path.with_extension(ext).to_str().unwrap(),
-            ])
-            .output()
-            .expect("failed to link");
-
+        // Compiling std and calling linker
+        let r = Command::new(if cfg!(windows) {
+            "clink.bat"
+        } else {
+            "clink.sh"
+        })
+        .args(&[
+            final_path.with_extension("o").to_str().unwrap(),
+            final_path.with_extension(ext).to_str().unwrap(),
+        ])
+        .output()
+        .expect("failed to link");
+        // println!("{}", String::from_utf8(r.stdout).unwrap());
         if !r.status.success() {
             let message = String::from_utf8(r.stderr).unwrap();
-            print!("Linking std failed");
+            print!("Linking failed");
             return Err(Error::with_message(0, 0, &message, "Codegen"));
         }
-        println!("linking {}", s.status);
+        println!("linking {}", r.status);
         Ok(())
     }
 
