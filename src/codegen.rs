@@ -6,6 +6,7 @@ use crate::symbol_table::SymbolTable;
 use std::path::Path;
 use std::process::Command;
 use std::result::Result;
+use std::time::Instant;
 use std::time::SystemTime;
 
 use inkwell::basic_block::BasicBlock;
@@ -259,10 +260,14 @@ impl<'ctx> CodeGen<'ctx> {
         filename: &Path,
     ) -> Result<(), Error> {
         // Build Ast
+        let now = Instant::now();
         let main = ast.generate();
         if let Err(e) = main {
             return Err(e);
         }
+        println!("Ast generation: {}", now.elapsed().as_secs_f64());
+
+        let now = Instant::now();
         let mut main = main.unwrap();
         if !main.header.arguments.is_empty() || main.header.rtype != TypeDecl::Void {
             return Err(Error::with_message(
@@ -294,6 +299,9 @@ impl<'ctx> CodeGen<'ctx> {
         if let Err(e) = self.module.verify() {
             eprintln!("verify error: {}", e);
         }
+        println!("Code generation: {}", now.elapsed().as_secs_f64());
+
+        let now = Instant::now();
         // Create FPM
         let fpm = PassManager::create(&self.module);
 
@@ -363,35 +371,42 @@ impl<'ctx> CodeGen<'ctx> {
                 Err(e) => panic!("writing intemidiate file error: {}", e),
             };
         }
+        println!("LLVM Compiling: {}", now.elapsed().as_secs_f64());
         if output_final || output_intermidiate {
             return Ok(());
         }
         /*****************
             Extra steps
         *****************/
-        let ext = if cfg!(windows) { "exe" } else { "A" };
-        // Compiling std and calling linker
-        let name = if cfg!(windows) {
-            "clink.bat"
+
+        let now = Instant::now();
+        let r = if cfg!(windows) {
+            let name = "clink.bat";
+            Command::new(name)
+                .args(&[
+                    final_path.with_extension("o").to_str().unwrap(),
+                    final_path.with_extension("exe").to_str().unwrap(),
+                ])
+                .output()
+                .expect("failed to link")
         } else {
-            "sh"
+            let name = "sh";
+            Command::new(name)
+                .args(&[
+                    "./clink.sh",
+                    final_path.with_extension("o").to_str().unwrap(),
+                    final_path.with_extension("").to_str().unwrap(),
+                ])
+                .output()
+                .expect("failed to link")
         };
-        let r = Command::new(name)
-        .args(&[
-            if !cfg!(windows) {
-                "./clink.sh"
-            } else {""},
-            final_path.with_extension("o").to_str().unwrap(),
-            final_path.with_extension(ext).to_str().unwrap(),
-        ])
-        .output()
-        .expect("failed to link");
-         println!("{}", String::from_utf8(r.stdout).unwrap());
         if !r.status.success() {
             let message = String::from_utf8(r.stderr).unwrap();
-            print!("Linking failed");
+            println!("Linking failed");
+            println!("{}", message);
             return Err(Error::with_message(0, 0, &message, "Codegen"));
         }
+        println!("Linking: {}\n", now.elapsed().as_secs_f64());
         println!("linking {}", r.status);
         Ok(())
     }
