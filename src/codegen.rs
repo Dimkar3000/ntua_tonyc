@@ -3,17 +3,18 @@ use crate::error::Error;
 use crate::parser::TokenKind;
 use crate::symbol_table::SymbolTable;
 
-use std::path::Path;
-use std::process::Command;
-use std::result::Result;
-use std::time::Instant;
-use std::time::SystemTime;
-
 use inkwell::basic_block::BasicBlock;
 use inkwell::builder::Builder;
 use inkwell::context::Context;
 use inkwell::module::Module;
 use inkwell::IntPredicate;
+
+use std::collections::HashMap;
+use std::path::Path;
+use std::process::Command;
+use std::result::Result;
+use std::time::Instant;
+use std::time::SystemTime;
 
 use crate::ast::*;
 use inkwell::attributes::AttributeLoc;
@@ -38,7 +39,7 @@ pub struct CodeGen<'ctx> {
     pub module: Module<'ctx>,
     pub builder: Builder<'ctx>,
     pub function_table: SymbolTable<FunctionValue<'ctx>>,
-    pub variable_list: Vec<(String, PointerValue<'ctx>)>,
+    pub ctx_mapping: HashMap<String, Vec<VarDef>>,
 }
 
 impl<'ctx> CodeGen<'ctx> {
@@ -63,6 +64,18 @@ impl<'ctx> CodeGen<'ctx> {
             BasicTypeEnum::StructType(v) => v.size_of(),
             BasicTypeEnum::VectorType(v) => v.size_of(),
         }
+    }
+
+    fn context_to_type(&self, list: &[VarDef]) -> BasicTypeEnum<'ctx> {
+        let fields: Vec<_> = list
+            .iter()
+            .map(|x| {
+                self.typedecl_to_type(&x.var_type)
+                    .ptr_type(AddressSpace::Generic)
+                    .as_basic_type_enum()
+            })
+            .collect();
+        self.context.struct_type(&fields, true).into()
     }
 
     fn typedecl_to_type(&self, t: &TypeDecl) -> BasicTypeEnum<'ctx> {
@@ -148,6 +161,15 @@ impl<'ctx> CodeGen<'ctx> {
                 args.push(t);
             }
         }
+        // Handle optional context
+        if !func.ctx.is_empty() {
+            let r = self
+                .context_to_type(&func.ctx)
+                .into_struct_type()
+                .ptr_type(AddressSpace::Generic)
+                .into();
+            args.insert(0, r);
+        }
 
         if func.rtype == TypeDecl::Void {
             self.context.void_type().fn_type(&args, false)
@@ -159,27 +181,18 @@ impl<'ctx> CodeGen<'ctx> {
     fn func_to_function_type(&mut self, func: &FuncDef) -> FunctionType<'ctx> {
         self.funcdecl_to_function_type(&func.header)
     }
-
-    fn find_pointer(&self, name: &str) -> Option<PointerValue<'ctx>> {
-        self.variable_list
-            .iter()
-            .rev()
-            .find_map(|x| if x.0 == name { Some(x.1) } else { None })
-    }
 }
 
 impl<'ctx> CodeGen<'ctx> {
     pub fn new(context: &'ctx Context, module: Module<'ctx>) -> Result<Self, Error> {
         let mut std = SymbolTable::new();
         std.open_scope("root");
-
         let gc_malloct = context
             .i8_type()
             .ptr_type(AddressSpace::Generic)
             .fn_type(&[context.i64_type().into()], false);
         let gc_malloc = module.add_function("GC_malloc", gc_malloct, Some(Linkage::External));
         std.insert("GC_malloc".to_owned(), gc_malloc)?;
-
         let strlent = context.i16_type().fn_type(
             &[context.i8_type().ptr_type(AddressSpace::Generic).into()],
             false,
@@ -247,13 +260,13 @@ impl<'ctx> CodeGen<'ctx> {
             module,
             builder: context.create_builder(),
             function_table: std,
-            variable_list: Vec::new(),
+            ctx_mapping: HashMap::new(),
         })
     }
 
-    pub fn compile<'a>(
+    pub fn compile(
         &mut self,
-        ast: &'a mut AstRoot<'a>,
+        ast: &mut AstRoot,
         output_intermidiate: bool,
         output_final: bool,
         optimize: bool,
@@ -283,39 +296,99 @@ impl<'ctx> CodeGen<'ctx> {
             .module
             .add_function("main", self.context.i32_type().fn_type(&[], false), None);
         let entry_block = self.context.append_basic_block(f, "main_entry");
+
+        //
         // self.function_table.insert("main", f).unwrap();
         if main.header.name == "main" {
             main.header.name = "main_".to_owned();
         };
         // Create Code
         self.compile_func(self.context, &main)?;
+
+        self.builder.position_at_end(entry_block);
+        // // Init GC
+        // let gc_init = self.function_table.lookup("GC_INIT");
+        // self.builder.build_call(*gc_init.unwrap(), &[], "init_gc");
         // Fill wrapper
         let callee = self.module.get_function(&main.header.name).unwrap();
-        self.builder.position_at_end(entry_block);
         self.builder.build_call(callee, &[], "call_entry");
         self.builder
             .build_return(Some(&self.context.i32_type().const_int(0, false)));
         // Clean global function table
         if let Err(e) = self.module.verify() {
-            eprintln!("verify error: {}", e);
+            use colored::*;
+            let m: String = e.to_str().unwrap().replace("\n", "\n\t\t ");
+            eprintln!("{}: {}", "verifier warning".to_owned().yellow(), m)
         }
-        println!("Code generation: {}", now.elapsed().as_secs_f64());
-
+        println!("Code generation: {:.5} secs", now.elapsed().as_secs_f64());
         let now = Instant::now();
         // Create FPM
-        let fpm = PassManager::create(&self.module);
-
         // Build Object file
         let interm_path = filename.with_extension("imm");
         let final_path = filename.with_extension("asm");
         if optimize {
-            fpm.add_instruction_combining_pass();
-            fpm.add_reassociate_pass();
-            fpm.add_gvn_pass();
-            fpm.add_cfg_simplification_pass();
-            fpm.add_basic_alias_analysis_pass();
-            fpm.add_promote_memory_to_register_pass();
-            fpm.finalize();
+            let pass_manager = PassManager::create(());
+
+            pass_manager.add_argument_promotion_pass();
+            pass_manager.add_constant_merge_pass();
+            pass_manager.add_dead_arg_elimination_pass();
+            pass_manager.add_function_attrs_pass();
+            pass_manager.add_function_inlining_pass();
+            pass_manager.add_always_inliner_pass();
+            pass_manager.add_global_dce_pass();
+            pass_manager.add_global_optimizer_pass();
+            pass_manager.add_ip_constant_propagation_pass();
+            pass_manager.add_prune_eh_pass();
+            pass_manager.add_ipsccp_pass();
+            pass_manager.add_internalize_pass(true);
+            pass_manager.add_strip_dead_prototypes_pass();
+            pass_manager.add_strip_symbol_pass();
+            pass_manager.add_loop_vectorize_pass();
+            pass_manager.add_slp_vectorize_pass();
+            pass_manager.add_aggressive_dce_pass();
+            pass_manager.add_alignment_from_assumptions_pass();
+            pass_manager.add_cfg_simplification_pass();
+            pass_manager.add_dead_store_elimination_pass();
+            pass_manager.add_scalarizer_pass();
+            pass_manager.add_merged_load_store_motion_pass();
+            pass_manager.add_gvn_pass();
+            pass_manager.add_ind_var_simplify_pass();
+            pass_manager.add_instruction_combining_pass();
+            pass_manager.add_jump_threading_pass();
+            pass_manager.add_licm_pass();
+            pass_manager.add_loop_deletion_pass();
+            pass_manager.add_loop_idiom_pass();
+            pass_manager.add_loop_rotate_pass();
+            pass_manager.add_loop_reroll_pass();
+            pass_manager.add_loop_unroll_pass();
+            pass_manager.add_loop_unswitch_pass();
+            pass_manager.add_memcpy_optimize_pass();
+            pass_manager.add_partially_inline_lib_calls_pass();
+            pass_manager.add_lower_switch_pass();
+            pass_manager.add_promote_memory_to_register_pass();
+            pass_manager.add_reassociate_pass();
+            pass_manager.add_sccp_pass();
+            pass_manager.add_scalar_repl_aggregates_pass();
+            pass_manager.add_scalar_repl_aggregates_pass_ssa();
+            pass_manager.add_scalar_repl_aggregates_pass_with_threshold(1);
+            pass_manager.add_simplify_lib_calls_pass();
+            pass_manager.add_tail_call_elimination_pass();
+            pass_manager.add_constant_propagation_pass();
+            pass_manager.add_demote_memory_to_register_pass();
+            pass_manager.add_verifier_pass();
+            pass_manager.add_correlated_value_propagation_pass();
+            pass_manager.add_early_cse_pass();
+            pass_manager.add_lower_expect_intrinsic_pass();
+            pass_manager.add_type_based_alias_analysis_pass();
+            pass_manager.add_scoped_no_alias_aa_pass();
+            pass_manager.add_basic_alias_analysis_pass();
+            let time = Instant::now();
+            // Spend half a sec to optimize code
+            while pass_manager.run_on(&self.module) {
+                if time.elapsed().as_secs_f32() > 0.5 {
+                    break;
+                }
+            }
         }
 
         Target::initialize_x86(&InitializationConfig::default());
@@ -371,7 +444,7 @@ impl<'ctx> CodeGen<'ctx> {
                 Err(e) => panic!("writing intemidiate file error: {}", e),
             };
         }
-        println!("LLVM Compiling: {}", now.elapsed().as_secs_f64());
+        println!("LLVM Compiling: {:.5} secs", now.elapsed().as_secs_f64());
         if output_final || output_intermidiate {
             return Ok(());
         }
@@ -406,8 +479,7 @@ impl<'ctx> CodeGen<'ctx> {
             println!("{}", message);
             return Err(Error::with_message(0, 0, &message, "Codegen"));
         }
-        println!("Linking: {}\n", now.elapsed().as_secs_f64());
-        println!("linking {}", r.status);
+        println!("Linking: {:.5} secs", now.elapsed().as_secs_f64());
         Ok(())
     }
 
@@ -424,28 +496,43 @@ impl<'ctx> CodeGen<'ctx> {
             self.store_function(&func.header.name, ctype, context, ref_list)?
         };
         self.function_table.open_scope(&func.header.name);
+        let mut var_list: HashMap<String, PointerValue> = HashMap::new();
+
         let entry_block = self
             .context
             .append_basic_block(function, &format!("{}_entry", func.header.name));
         self.builder.position_at_end(entry_block);
 
+        // The context will always be the first arguments
+        let mut base = 0;
+        if !func.header.ctx.is_empty() {
+            base = 1;
+            let t = function.get_first_param().unwrap();
+            for i in 0..func.header.ctx.len() {
+                let ii = self
+                    .builder
+                    .build_struct_gep(t.into_pointer_value(), i as u32, "tmp2")
+                    .unwrap();
+                let r = self.builder.build_load(ii, &format!("arg_{}", i));
+                var_list.insert(func.header.ctx[i].name.clone(), r.into_pointer_value());
+            }
+        }
         // Function arguments
         for i in 0..func.header.arguments.len() {
-            let t = function.get_nth_param(i as u32);
+            let t = function.get_nth_param((i + base) as u32);
             match t {
                 Some(p) => {
                     if func.header.arguments[i].is_ref && p.is_pointer_value() {
-                        self.variable_list.push((
+                        var_list.insert(
                             func.header.arguments[i].def.name.clone(),
                             p.into_pointer_value(),
-                        ));
+                        );
                     } else {
                         let ptr = self
                             .builder
                             .build_alloca(p.get_type(), &func.header.arguments[i].def.name);
                         self.builder.build_store(ptr, p);
-                        self.variable_list
-                            .push((func.header.arguments[i].def.name.clone(), ptr));
+                        var_list.insert(func.header.arguments[i].def.name.clone(), ptr);
                     }
                 }
                 None => {
@@ -453,6 +540,20 @@ impl<'ctx> CodeGen<'ctx> {
                 }
             }
         }
+        // Variables
+        for i in &func.vars {
+            let t = self.typedecl_to_type(&i.var_type);
+            let p = match &i.var_type {
+                TypeDecl::List(_) => self.create_typed_nil(&t, true).into_pointer_value(),
+                _ => self
+                    .builder
+                    .build_alloca(t, &format!("{}_{}", func.header.name, i.name)),
+            };
+            var_list.insert(i.name.clone(), p);
+        }
+        self.ctx_mapping
+            .insert(func.header.name.clone(), func.header.ctx.clone());
+
         // Create llvm function for all defs and decls
         for i in &func.defs {
             let ref_list = i.header.arguments.iter().map(|x| x.is_ref).collect();
@@ -467,36 +568,14 @@ impl<'ctx> CodeGen<'ctx> {
                 self.store_function(&i.name, ftype, context, ref_list)?;
             }
         }
-
-        // Variables
-        for i in &func.vars {
-            let t = self.typedecl_to_type(&i.var_type);
-            let p = match &i.var_type {
-                TypeDecl::List(_) => self.create_typed_nil(&t, true).into_pointer_value(),
-                _ => self
-                    .builder
-                    .build_alloca(t, &format!("{}_{}", func.header.name, i.name)),
-            };
-            self.variable_list.push((i.name.clone(), p));
-        }
-
-        // Statements
-        self.compile_stmts(func, entry_block);
-
-        // Cleanup
-
-        // Remove the variable pointers for this function
-        for _ in 0..func.header.arguments.len() {
-            self.variable_list.pop();
-        }
-        for _ in 0..func.vars.len() {
-            self.variable_list.pop();
-        }
-
         // Compile Function definitions
         for i in &func.defs {
             self.compile_func(context, i)?;
         }
+        // Statements
+        self.builder.position_at_end(entry_block);
+        self.compile_stmts(func, entry_block, &var_list);
+
         self.function_table.close_scope();
         Ok(())
     }
@@ -509,6 +588,7 @@ impl<'ctx> CodeGen<'ctx> {
         block: BasicBlock<'ctx>,
         exit_block: BasicBlock<'ctx>,
         exited: &mut bool,
+        var_list: &HashMap<String, PointerValue<'ctx>>,
     ) -> bool {
         match stmt {
             Stmt::Exit => {
@@ -519,13 +599,13 @@ impl<'ctx> CodeGen<'ctx> {
                 match &**exp {
                     Expr::Atomic(_, a) => {
                         // the result is a variable to load
-                        let result = self.get_atom(&a);
+                        let result = self.get_atom(&a, var_list);
                         let r = self.builder.build_load(result, "return");
                         self.builder.build_return(Some(&r));
                         return true;
                     }
                     _ => {
-                        let result = self.compile_exp(exp, false);
+                        let result = self.compile_exp(exp, false, var_list);
                         self.builder.build_return(Some(&result));
                         return true;
                     }
@@ -537,7 +617,7 @@ impl<'ctx> CodeGen<'ctx> {
                 elseif: elseifs,
                 elseblock: else_stmts,
             } => {
-                let condition = self.compile_exp(cond, false);
+                let condition = self.compile_exp(cond, false, var_list);
                 assert!(condition.is_int_value());
                 let mut then_block = self.context.insert_basic_block_after(
                     block,
@@ -561,7 +641,7 @@ impl<'ctx> CodeGen<'ctx> {
                 let mut contains_return = false;
                 let mut exited = false;
                 for i in main_stmt {
-                    if self.compile_stmt(i, func, then_block, exit_block, &mut exited) {
+                    if self.compile_stmt(i, func, then_block, exit_block, &mut exited, var_list) {
                         assert!(!contains_return);
                         contains_return = true;
                     }
@@ -577,7 +657,7 @@ impl<'ctx> CodeGen<'ctx> {
                     else_block = self
                         .context
                         .insert_basic_block_after(else_block, &format!("else_ifelse{}", i));
-                    let condition = self.compile_exp(&elseif.0, false);
+                    let condition = self.compile_exp(&elseif.0, false, var_list);
                     assert!(condition.is_int_value());
                     self.builder.build_conditional_branch(
                         condition.into_int_value(),
@@ -589,7 +669,14 @@ impl<'ctx> CodeGen<'ctx> {
                     let mut contains_return = false;
                     let mut exited = false;
                     for i in &elseif.1 {
-                        if self.compile_stmt(&i, func, then_block, exit_block, &mut exited) {
+                        if self.compile_stmt(
+                            &i,
+                            func,
+                            then_block,
+                            exit_block,
+                            &mut exited,
+                            var_list,
+                        ) {
                             assert!(!contains_return);
                             contains_return = true;
                         }
@@ -603,7 +690,7 @@ impl<'ctx> CodeGen<'ctx> {
                 let mut contains_return = false;
                 let mut exited = false;
                 for i in else_stmts {
-                    if self.compile_stmt(i, func, else_block, exit_block, &mut exited) {
+                    if self.compile_stmt(i, func, else_block, exit_block, &mut exited, var_list) {
                         assert!(!contains_return);
                         contains_return = true;
                     }
@@ -616,7 +703,7 @@ impl<'ctx> CodeGen<'ctx> {
             Stmt::For(pre_stmts, cond, post_stmts, main_stmts) => {
                 let mut exited = false;
                 for i in pre_stmts {
-                    self.compile_stmt(&i, func, block, exit_block, &mut exited);
+                    self.compile_stmt(&i, func, block, exit_block, &mut exited, var_list);
                 }
                 let for_header = self.context.insert_basic_block_after(block, "for_header");
                 let for_body = self
@@ -625,7 +712,7 @@ impl<'ctx> CodeGen<'ctx> {
                 let for_exit = self.context.insert_basic_block_after(for_body, "for_exit");
                 self.builder.build_unconditional_branch(for_header);
                 self.builder.position_at_end(for_header);
-                let condition = self.compile_exp(cond, false);
+                let condition = self.compile_exp(cond, false, var_list);
                 assert!(condition.is_int_value());
                 self.builder.build_conditional_branch(
                     condition.into_int_value(),
@@ -638,13 +725,13 @@ impl<'ctx> CodeGen<'ctx> {
                 let mut returned = false;
                 self.builder.position_at_end(for_body);
                 for i in main_stmts {
-                    if self.compile_stmt(i, func, for_body, for_exit, &mut exited) {
+                    if self.compile_stmt(i, func, for_body, for_exit, &mut exited, var_list) {
                         assert!(!returned);
                         returned = true;
                     }
                 }
                 for i in post_stmts {
-                    if self.compile_stmt(i, func, for_body, for_exit, &mut exited) {
+                    if self.compile_stmt(i, func, for_body, for_exit, &mut exited, var_list) {
                         assert!(!returned);
                         returned = true;
                     }
@@ -674,15 +761,49 @@ impl<'ctx> CodeGen<'ctx> {
                             }
                         }
                     }
-                    let r = self.compile_exp(&arg, is_ref);
+                    let r = self.compile_exp(&arg, is_ref, var_list);
                     v.push(r);
+                }
+                let mut my_ctx = func.defs.iter().find_map(|x| {
+                    if &x.header.name == name {
+                        Some(x.header.ctx.clone())
+                    } else {
+                        None
+                    }
+                });
+                if my_ctx.is_none() {
+                    my_ctx = func.decls.iter().find_map(|x| {
+                        if &x.name == name {
+                            Some(x.ctx.clone())
+                        } else {
+                            None
+                        }
+                    });
+                }
+                if my_ctx.is_some() {
+                    let my_ctx = my_ctx.unwrap();
+                    if !my_ctx.is_empty() {
+                        // we have context
+                        let ctype = self.context_to_type(&my_ctx);
+                        let p = self.builder.build_alloca(ctype, "ctx");
+                        for i in 0..my_ctx.len() {
+                            let d = var_list.get(&my_ctx[i].name).unwrap();
+                            let t = self.builder.build_struct_gep(
+                                p,
+                                i as u32,
+                                &format!("tmp_{}_ptr", my_ctx[i].name),
+                            );
+                            self.builder.build_store(t.unwrap(), *d);
+                        }
+                        v.insert(0, p.into());
+                    }
                 }
                 self.builder
                     .build_call(function, &v, &format!("call_{}", name));
             }
             Stmt::Assign(atom, exp) => {
-                let ptr = self.get_atom(atom);
-                let value = self.compile_exp(exp, false);
+                let ptr = self.get_atom(atom, &var_list);
+                let value = self.compile_exp(exp, false, var_list);
                 if value.is_pointer_value()
                     && value.into_pointer_value().is_null()
                     && value.into_pointer_value().is_const()
@@ -703,14 +824,19 @@ impl<'ctx> CodeGen<'ctx> {
     // Stmt
     // Note: I pass the FuncDef some I can look up Function Definition for call statements.
     //       I need to do that to understand how to pass the arguments( by ref or by value).
-    fn compile_stmts(&mut self, func: &FuncDef, block: BasicBlock<'ctx>) {
+    fn compile_stmts(
+        &mut self,
+        func: &FuncDef,
+        block: BasicBlock<'ctx>,
+        var_list: &HashMap<String, PointerValue<'ctx>>,
+    ) {
         let mut exited = false;
         let mut returned = false;
         for i in 0..func.stmts.len() {
             let stmt = &func.stmts[i];
             // Note: not sure what happend when you put an exit inside a function bloxk
             //       probably ast souldn't allow it
-            if self.compile_stmt(stmt, func, block, block, &mut exited) {
+            if self.compile_stmt(stmt, func, block, block, &mut exited, var_list) {
                 assert!(!returned);
                 returned = true;
             }
@@ -722,7 +848,11 @@ impl<'ctx> CodeGen<'ctx> {
     }
 
     // Note: Atoms return pointers to values
-    pub fn get_atom(&mut self, atom: &Atomic) -> PointerValue<'ctx> {
+    pub fn get_atom(
+        &mut self,
+        atom: &Atomic,
+        var_list: &HashMap<String, PointerValue<'ctx>>,
+    ) -> PointerValue<'ctx> {
         match atom {
             Atomic::CString(s) => {
                 let g = match self.module.get_global(s) {
@@ -738,8 +868,8 @@ impl<'ctx> CodeGen<'ctx> {
                 p
             }
             Atomic::Accessor(atom, exp) => {
-                let ptr = self.get_atom(atom);
-                let index = self.compile_exp(exp, false);
+                let ptr = self.get_atom(atom, var_list);
+                let index = self.compile_exp(exp, false, var_list);
                 let data = self.builder.build_load(ptr, "store_data");
                 unsafe {
                     self.builder.build_in_bounds_gep(
@@ -762,7 +892,7 @@ impl<'ctx> CodeGen<'ctx> {
                         Some(v) => v.get_string_value().to_str().unwrap_or("false") == "true",
                         None => false,
                     };
-                    let r = self.compile_exp(&arg, is_ref);
+                    let r = self.compile_exp(&arg, is_ref, var_list);
                     if r.is_pointer_value()
                         && r.into_pointer_value().is_null()
                         && r.into_pointer_value().is_const()
@@ -775,6 +905,25 @@ impl<'ctx> CodeGen<'ctx> {
                         v.push(r);
                     }
                 }
+                let my_ctx = self.ctx_mapping.get(name);
+                if my_ctx.is_some() {
+                    let my_ctx = my_ctx.unwrap();
+                    if !my_ctx.is_empty() {
+                        // we have context
+                        let ctype = self.context_to_type(my_ctx);
+                        let p = self.builder.build_alloca(ctype, "ctx");
+                        for i in 0..my_ctx.len() {
+                            let d = var_list.get(&my_ctx[i].name).unwrap();
+                            let t = self.builder.build_struct_gep(
+                                p,
+                                i as u32,
+                                &format!("tmp_{}_ptr", my_ctx[i].name),
+                            );
+                            self.builder.build_store(t.unwrap(), *d);
+                        }
+                        v.insert(0, p.into());
+                    }
+                }
                 let result = self
                     .builder
                     .build_call(function, &v, &format!("call_{}", name))
@@ -785,9 +934,9 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder.build_store(r, result);
                 r
             }
-            Atomic::Name(_, name) => match self.find_pointer(name) {
-                Some(k) => k,
-                None => panic!("variable name not found: {}",),
+            Atomic::Name(_, name) => match var_list.get(name) {
+                Some(k) => *k,
+                None => panic!("variable name not found: {}", name),
             },
         }
     }
@@ -827,12 +976,17 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
-    fn compile_exp(&mut self, exp: &Expr, is_ref: bool) -> BasicValueEnum<'ctx> {
+    fn compile_exp(
+        &mut self,
+        exp: &Expr,
+        is_ref: bool,
+        var_list: &HashMap<String, PointerValue<'ctx>>,
+    ) -> BasicValueEnum<'ctx> {
         match exp {
             Expr::Hash(t, left, right) => {
                 let ctype = self.typedecl_to_type(t);
-                let data = self.compile_exp(left, false);
-                let tail_data = self.compile_exp(right, false);
+                let data = self.compile_exp(left, false, var_list);
+                let tail_data = self.compile_exp(right, false, var_list);
                 let tail = if tail_data.get_type().is_pointer_type()
                     && tail_data.into_pointer_value().is_null()
                     && tail_data.into_pointer_value().is_const()
@@ -915,17 +1069,11 @@ impl<'ctx> CodeGen<'ctx> {
                 }
             }
             Expr::NilCheck(x) => {
-                let s = self.compile_exp(x, true);
-                let flag = unsafe {
-                    self.builder.build_in_bounds_gep(
-                        s.into_pointer_value(),
-                        &[
-                            self.context.i32_type().const_int(0, false),
-                            self.context.i32_type().const_int(2, false),
-                        ],
-                        "flag",
-                    )
-                };
+                let s = self.compile_exp(x, true, var_list);
+                let flag = self
+                    .builder
+                    .build_struct_gep(s.into_pointer_value(), 2 as u32, "flag")
+                    .unwrap();
                 let v = self.builder.build_load(flag, "load_f");
                 self.builder
                     .build_int_compare(
@@ -937,7 +1085,7 @@ impl<'ctx> CodeGen<'ctx> {
                     .as_basic_value_enum()
             }
             Expr::Tail(_, exp) => {
-                let s = self.compile_exp(exp, true);
+                let s = self.compile_exp(exp, true, var_list);
                 let t = unsafe {
                     self.builder.build_in_bounds_gep(
                         s.into_pointer_value(),
@@ -956,7 +1104,7 @@ impl<'ctx> CodeGen<'ctx> {
                 }
             }
             Expr::Head(_t, exp) => {
-                let list = self.compile_exp(exp, true);
+                let list = self.compile_exp(exp, true, var_list);
                 assert!(list.is_pointer_value());
                 let element = self
                     .builder
@@ -978,7 +1126,7 @@ impl<'ctx> CodeGen<'ctx> {
             Expr::CInt(n) => self.context.i16_type().const_int(*n as u64, true).into(),
             Expr::CChar(c) => self.context.i8_type().const_int(*c as u64, false).into(),
             Expr::Atomic(t, at) => {
-                let ptr = self.get_atom(at);
+                let ptr = self.get_atom(at, var_list);
                 if is_ref {
                     return ptr.into();
                 }
@@ -987,7 +1135,7 @@ impl<'ctx> CodeGen<'ctx> {
             }
             Expr::NewArray(t, exp) => {
                 let t = self.typedecl_to_type(&*t);
-                let size = self.compile_exp(exp, false);
+                let size = self.compile_exp(exp, false, var_list);
                 assert!(size.is_int_value());
                 let size = self.builder.build_int_cast(
                     size.into_int_value(),
@@ -1005,10 +1153,10 @@ impl<'ctx> CodeGen<'ctx> {
             }
             Expr::Binary(t, x, y) => {
                 let x = self
-                    .compile_exp(x.as_ref().unwrap(), false)
+                    .compile_exp(x.as_ref().unwrap(), false, var_list)
                     .into_int_value();
                 let y = self
-                    .compile_exp(y.as_ref().unwrap(), false)
+                    .compile_exp(y.as_ref().unwrap(), false, var_list)
                     .into_int_value();
                 match t {
                     TokenKind::Addition => BasicValueEnum::IntValue(self.builder.build_int_add(
@@ -1038,10 +1186,10 @@ impl<'ctx> CodeGen<'ctx> {
             }
             Expr::Logical(t, x, y) => {
                 let x = self
-                    .compile_exp(x.as_ref().unwrap(), false)
+                    .compile_exp(x.as_ref().unwrap(), false, var_list)
                     .into_int_value();
                 let y = self
-                    .compile_exp(y.as_ref().unwrap(), false)
+                    .compile_exp(y.as_ref().unwrap(), false, var_list)
                     .into_int_value();
                 if t == &TokenKind::KAnd {
                     BasicValueEnum::IntValue(self.builder.build_and(x, y, "op_and"))
@@ -1052,7 +1200,7 @@ impl<'ctx> CodeGen<'ctx> {
                 }
             }
             Expr::Negation(Some(t)) => {
-                let r = self.compile_exp(t, false);
+                let r = self.compile_exp(t, false, var_list);
                 self.builder.build_not(r.into_int_value(), "not").into()
             }
             Expr::Comparison(t, x, y) => {
@@ -1066,10 +1214,10 @@ impl<'ctx> CodeGen<'ctx> {
                     e => panic!("Comparison with token: {:?}", (e, x, y)),
                 };
                 let x = self
-                    .compile_exp(x.as_ref().unwrap(), false)
+                    .compile_exp(x.as_ref().unwrap(), false, var_list)
                     .into_int_value();
                 let y = self
-                    .compile_exp(y.as_ref().unwrap(), false)
+                    .compile_exp(y.as_ref().unwrap(), false, var_list)
                     .into_int_value();
                 BasicValueEnum::IntValue(self.builder.build_int_compare(
                     predicate,

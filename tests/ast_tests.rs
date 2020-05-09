@@ -1,4 +1,5 @@
 use libtonyc::ast::{AstRoot, FuncDef};
+use libtonyc::codegen::CodeGen;
 use libtonyc::error::Error;
 
 fn read_file(path: &str) -> Result<FuncDef, Error> {
@@ -13,6 +14,7 @@ fn read_file(path: &str) -> Result<FuncDef, Error> {
 }
 
 #[test]
+#[ignore]
 fn test_ok() {
     use std::fs;
     for entry in fs::read_dir("./files/examples/ok/").unwrap() {
@@ -33,6 +35,7 @@ fn test_ok() {
 }
 
 #[test]
+#[ignore]
 fn test_error() {
     use std::fs;
     for entry in fs::read_dir("./files/examples/error/").unwrap() {

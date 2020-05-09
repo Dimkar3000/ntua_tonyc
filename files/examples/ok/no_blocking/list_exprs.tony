@@ -1,0 +1,7 @@
+def test():
+ list[int] n 
+ n := 1 # nil
+ if nil?(tail(n)) or head(n) = 1:
+    exit
+ end
+end

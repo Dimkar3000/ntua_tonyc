@@ -1,9 +1,22 @@
+use crate::ast::var_def::VarDef;
 use crate::ast::Expr;
 use crate::ast::TypeDecl;
 use crate::error::Error;
-use crate::parser::{Parser, Token, TokenExtra, TokenKind};
+use crate::parser::{Token, TokenExtra, TokenKind};
 use crate::symbol_table::SymbolTable;
 use std::fmt::Display;
+
+fn get_token<'a>(tokens: &'a [Token], index: &mut usize) -> Result<&'a Token, Error> {
+    match tokens.get(*index) {
+        Some(k) => Ok(k),
+        None => Err(Error::with_message(
+            tokens[*index - 1].column,
+            tokens[*index - 1].line,
+            "tried to get token but failed",
+            "Ast",
+        )),
+    }
+}
 
 /// Atomic is an code block that can stand on it's own.
 #[derive(Debug, Clone)]
@@ -73,48 +86,54 @@ impl Atomic {
 
     /// Generate a new atom by consuming tokens from the parser and checking with the symbol table
     pub fn generate(
-        parser: &mut Parser,
+        tokens: &[Token],
+        index: &mut usize,
         symbol_table: &mut SymbolTable<TypeDecl>,
+        ctx_table: &mut Vec<VarDef>,
     ) -> Result<Atomic, Error> {
-        let base = match parser.read_token() {
+        let mut current_token = get_token(tokens, index)?;
+        let base = match current_token {
             Token {
                 kind: TokenKind::Name,
                 extra: TokenExtra::Name(n),
                 ..
             } => {
                 let name = n.to_string();
-                match parser.advance_token().kind {
+                *index += 1;
+                current_token = get_token(tokens, index)?;
+                match current_token.kind {
                     TokenKind::LParenthesis => {
                         let mut args = Vec::new();
                         loop {
-                            parser.advance_token();
-
-                            if parser.read_token().get_kind() == TokenKind::RParenthesis {
-                                parser.advance_token();
+                            *index += 1;
+                            current_token = get_token(tokens, index)?;
+                            if current_token.kind == TokenKind::RParenthesis {
+                                *index += 1;
+                                current_token = get_token(tokens, index)?;
                                 break;
                             }
-                            let exp = Expr::generate(parser, symbol_table, true);
+                            let exp =
+                                Expr::generate(tokens, index, symbol_table, true, false, ctx_table);
+                            current_token = get_token(tokens, index)?;
                             let tmp = match exp {
                                 Ok(k) => k,
                                 Err(e) => return Err(e.extend("Function Arguments failed", "Ast")),
                             };
                             args.push(tmp);
-                            match parser.read_token().get_kind() {
+                            match current_token.kind {
                                 TokenKind::Comma => (),
                                 // TokenKind::RParenthesis => break,
                                 e => {
-                                    if parser.previous_token().get_kind() == TokenKind::RParenthesis
-                                    {
+                                    if tokens[*index - 1].kind == TokenKind::RParenthesis {
                                         // parser.get_token();
                                         break;
                                     }
                                     return Err(Error::with_message(
-                                        parser.column,
-                                        parser.line,
+                                        current_token.column,
+                                        current_token.line,
                                         &format!(
                                             "Expected RParenthesis or comma, but got {}, {}",
-                                            e,
-                                            parser.read_token()
+                                            e, current_token
                                         ),
                                         "Ast",
                                     ));
@@ -126,8 +145,8 @@ impl Atomic {
                             Some(i) => Atomic::FuncCall(i.clone(), name, args),
                             None => {
                                 return Err(Error::with_message(
-                                    parser.column,
-                                    parser.line,
+                                    current_token.column,
+                                    current_token.line,
                                     &format!("Function name not defined: {}", name),
                                     "Ast",
                                 ))
@@ -137,11 +156,19 @@ impl Atomic {
                     _ => {
                         // parser.back();
                         match symbol_table.lookup(&name) {
-                            Some(i) => Atomic::Name(i.clone(), name),
+                            Some(i) => {
+                                if !ctx_table.iter().any(|x| x.name == name) {
+                                    ctx_table.push(VarDef {
+                                        name: name.clone(),
+                                        var_type: i.clone(),
+                                    });
+                                }
+                                Atomic::Name(i.clone(), name)
+                            }
                             None => {
                                 return Err(Error::with_message(
-                                    parser.column,
-                                    parser.line,
+                                    current_token.column,
+                                    current_token.line,
                                     &format!("Variable name not defined: {}", name),
                                     "Ast",
                                 ))
@@ -155,33 +182,35 @@ impl Atomic {
                 extra: TokenExtra::CString(s),
                 ..
             } => {
-                parser.advance_token();
-                Atomic::CString(s)
+                *index += 1;
+                Atomic::CString(s.to_string())
             }
 
             e => {
                 return Err(Error::with_message(
-                    parser.column,
-                    parser.line,
+                    e.column,
+                    e.line,
                     &format!("atomic failed to consume token: {}", e),
                     "Ast",
                 ))
             }
         };
-        match parser.read_token().get_kind() {
+        current_token = get_token(tokens, index)?;
+        match current_token.kind {
             TokenKind::LBracket => {
-                parser.advance_token();
-                let b = match Expr::generate(parser, symbol_table, false) {
+                *index += 1;
+                let b = match Expr::generate(tokens, index, symbol_table, false, false, ctx_table) {
                     Ok(k) => k,
                     Err(e) => return Err(e.extend("Failed to parse bracket content", "Ast")),
                 };
+                current_token = get_token(tokens, index)?;
                 match b {
                     Expr::CInt(_) | Expr::Unary(..) | Expr::Binary(..) => (),
                     Expr::Atomic(TypeDecl::Int, _) => (),
                     e => {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
+                            current_token.column,
+                            current_token.line,
                             &format!(
                                 "expression inside bracket should reduce to intiger, but {}",
                                 e
@@ -190,15 +219,15 @@ impl Atomic {
                         ))
                     }
                 }
-                match parser.read_token().get_kind() {
+                match current_token.kind {
                     TokenKind::RBracket => {
-                        parser.advance_token();
+                        *index += 1;
                         let r = Atomic::Accessor(Box::new(base), Box::new(b));
                         Ok(r)
                     }
                     e => Err(Error::with_message(
-                        parser.column,
-                        parser.line,
+                        current_token.column,
+                        current_token.line,
                         &format!("Ast; right bracket missing: {}", e),
                         "Ast",
                     )),

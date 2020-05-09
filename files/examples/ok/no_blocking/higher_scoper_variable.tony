@@ -1,0 +1,20 @@
+def a():
+    int i
+    char j
+    bool t
+    
+    def b():
+        int k
+        def int c():
+            j := 'c'
+            return k
+        end
+        k := 5
+        i:= c()
+        puti(i)
+    end
+
+    b()
+    putc('\n')
+    putc(j)
+end

@@ -4,6 +4,17 @@ use crate::parser::*;
 use crate::symbol_table::SymbolTable;
 use std::fmt::Display;
 
+fn get_token<'a>(tokens: &'a [Token], index: &mut usize) -> Result<&'a Token, Error> {
+    match tokens.get(*index) {
+        Some(k) => Ok(k),
+        None => Err(Error::with_message(
+            tokens[*index - 1].column,
+            tokens[*index - 1].line,
+            "tried to get token but failed",
+            "Vardef",
+        )),
+    }
+}
 #[derive(Debug, Clone)]
 pub struct VarDef {
     pub name: String,
@@ -25,46 +36,56 @@ impl VarDef {
     }
 
     pub fn generate(
-        parser: &mut Parser,
+        tokens: &[Token],
+        index: &mut usize,
         symbol_table: &mut SymbolTable<TypeDecl>,
     ) -> Result<Vec<VarDef>, Error> {
         let mut results = Vec::new();
-        let kind = &parser.read_token().get_kind();
-        if kind == &TokenKind::RParenthesis {
+        let starting_token = get_token(tokens, index)?;
+        if starting_token.kind == TokenKind::RParenthesis {
             return Ok(Vec::new());
         }
-        assert!(
-            kind == &TokenKind::KInt
-                || kind == &TokenKind::KChar
-                || kind == &TokenKind::KBool
-                || kind == &TokenKind::KList
-        );
-        match TypeDecl::generate(parser) {
+        if !(starting_token.kind == TokenKind::KInt
+            || starting_token.kind == TokenKind::KChar
+            || starting_token.kind == TokenKind::KBool
+            || starting_token.kind == TokenKind::KList)
+        {
+            return Err(Error::with_message(
+                starting_token.column,
+                starting_token.line,
+                &format!("unsopported token kind: {}", starting_token.kind),
+                "Vardef",
+            ));
+        }
+        match TypeDecl::generate(tokens, index) {
             Ok(t) => loop {
-                match parser.read_token().get_kind() {
+                let mut current_token = &tokens[*index];
+                match current_token.kind {
                     TokenKind::Name => {
-                        let name = parser.read_token().get_name().unwrap();
+                        let name = current_token.get_name().unwrap();
                         results.push(VarDef::new(&name, t.clone()));
                         match symbol_table.insert(name, t.clone()) {
                             Ok(_) => (),
                             Err(e) => {
                                 return Err(Error::with_message(
-                                    parser.column,
-                                    parser.line,
+                                    current_token.column,
+                                    current_token.line,
                                     &e,
                                     "Ast",
                                 ))
                             }
                         }
-                        if parser.advance_token().get_kind() != TokenKind::Comma {
+                        *index += 1;
+                        current_token = &tokens[*index];
+                        if current_token.kind != TokenKind::Comma {
                             break;
                         }
-                        parser.advance_token();
+                        *index += 1;
                     }
                     e => {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
+                            current_token.column,
+                            current_token.line,
                             &format!("Expected name definition, found \"{}\"", e),
                             "Ast",
                         ))

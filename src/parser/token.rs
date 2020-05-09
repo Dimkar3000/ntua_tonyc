@@ -2,12 +2,12 @@ use crate::parser::TokenKind;
 
 /// TokenExtra contains extra info of a token, depending on the case it could be empty
 #[derive(Debug, Clone)]
-pub enum TokenExtra<'a> {
+pub enum TokenExtra {
     None,
     /// CString is a String object because the content is not a copy of the original due to the escaped characters
     CString(String),
     Error(String),
-    Name(&'a str),
+    Name(String),
     Comment(usize, usize),
     Cchar(char),
     Int(i16),
@@ -16,15 +16,15 @@ pub enum TokenExtra<'a> {
 /// ### Token is the basic block of language
 /// it also carries for extra info to help error printing
 #[derive(Debug, Clone)]
-pub struct Token<'a> {
+pub struct Token {
     pub kind: TokenKind,
     pub column: usize,
     pub line: usize,
-    pub extra: TokenExtra<'a>,
+    pub extra: TokenExtra,
 }
 
 use std::fmt;
-impl<'a> fmt::Display for TokenExtra<'a> {
+impl fmt::Display for TokenExtra {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
             TokenExtra::None => write!(f, "none"),
@@ -38,7 +38,7 @@ impl<'a> fmt::Display for TokenExtra<'a> {
     }
 }
 
-impl<'a> fmt::Display for Token<'a> {
+impl fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(
             f,
@@ -48,11 +48,7 @@ impl<'a> fmt::Display for Token<'a> {
     }
 }
 
-impl<'a> Token<'a> {
-    pub fn get_kind(&self) -> TokenKind {
-        self.kind
-    }
-
+impl Token {
     pub fn get_cstring(&self) -> Result<String, ()> {
         if let TokenExtra::CString(s) = &self.extra {
             Ok(s.to_string())
@@ -67,9 +63,9 @@ impl<'a> Token<'a> {
             Err(())
         }
     }
-    pub fn get_name(&self) -> Result<&'a str, ()> {
-        if let TokenExtra::Name(s) = self.extra {
-            Ok(s)
+    pub fn get_name(&self) -> Result<String, ()> {
+        if let TokenExtra::Name(s) = &self.extra {
+            Ok(s.to_owned())
         } else {
             Err(())
         }
@@ -138,7 +134,7 @@ impl<'a> Token<'a> {
             extra: TokenExtra::CString(stream),
         }
     }
-    pub fn from_word(column: usize, line: usize, stream: &'a str) -> Self {
+    pub fn from_word(column: usize, line: usize, stream: &str) -> Self {
         match stream {
             "and" => Token {
                 kind: TokenKind::KAnd,
@@ -301,7 +297,7 @@ impl<'a> Token<'a> {
                 kind: TokenKind::Name,
                 column,
                 line,
-                extra: TokenExtra::Name(e),
+                extra: TokenExtra::Name(e.to_owned()),
             },
         }
     }

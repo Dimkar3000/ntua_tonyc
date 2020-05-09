@@ -3,11 +3,9 @@ use crate::parser::{Token, TokenExtra, TokenKind};
 pub struct Parser<'a> {
     stream: &'a str,
     index: usize,
-    token: Token<'a>,
-    p_token: Token<'a>,
-    p_index: usize,
-    pub column: usize,
-    pub line: usize,
+    token: Token,
+    column: usize,
+    line: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -19,32 +17,18 @@ impl<'a> Parser<'a> {
                 line: 0,
                 extra: TokenExtra::None,
             },
-            p_token: Token {
-                kind: TokenKind::NotStarted,
-                column: 0,
-                line: 0,
-                extra: TokenExtra::None,
-            },
             stream,
             index: 0,
-            p_index: 0,
             column: 0,
             line: 1,
         }
     }
-    pub fn read_token(&self) -> Token {
-        self.token.clone()
-    }
-    pub fn previous_token(&self) -> Token {
-        self.p_token.clone()
-    }
-
     /// tries to read a single character from the stream
     ///
     /// **Ok**: the character read
     ///
     /// **Err**: the error token to return
-    pub fn read_char(&mut self, is_string: bool) -> Result<char, Token<'a>> {
+    pub fn read_char(&mut self, is_string: bool) -> Result<char, Token> {
         let mut chr = self.stream[self.index..].chars().peekable();
         let start = self.index;
         // check that there is smething after the first tick
@@ -108,39 +92,31 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// changes the index and the current character to the previous one
-    ///
-    /// ***WARNING***: It cannot move back more than once
-    pub fn back(&mut self) {
-        self.index = self.p_index;
-        self.token = self.p_token.clone()
-    }
-
-    /// call this function to get the next token that is also useable
-    ///
-    /// Tokens: **NewLine**, **Space** and **Comment** are skipped
-    ///
-    /// it also advances the index to the beggining of the end of the token
-    pub fn advance_token(&mut self) -> Token {
-        self.p_token = self.token.clone();
-        self.p_index = self.index;
-        self.next_token();
+    /// Call this function to get the token stream to use;
+    pub fn produce(&mut self) -> Vec<Token> {
+        let mut result = Vec::new();
         loop {
-            let c = &self.token.kind;
-            match c {
-                TokenKind::NewLine => {
-                    self.column = 0;
-                }
-                TokenKind::Space => {
-                    self.column += 1;
-                }
-                TokenKind::Comment => (),
-                _ => break,
-            }
             self.next_token();
+            loop {
+                let c = &self.token.kind;
+                match c {
+                    TokenKind::NewLine => {
+                        self.column = 0;
+                    }
+                    TokenKind::Space => {
+                        self.column += 1;
+                    }
+                    TokenKind::Comment => (),
+                    _ => break,
+                }
+                self.next_token();
+            }
+            if self.token.kind == TokenKind::Empty {
+                break;
+            }
+            result.push(self.token.clone());
         }
-
-        self.token.clone()
+        result
     }
 
     fn next_token(&mut self) {

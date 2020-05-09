@@ -4,6 +4,18 @@ use crate::parser::*;
 use crate::symbol_table::SymbolTable;
 use std::fmt::Display;
 
+fn get_token<'a>(tokens: &'a [Token], index: &mut usize) -> Result<&'a Token, Error> {
+    match tokens.get(*index) {
+        Some(k) => Ok(k),
+        None => Err(Error::with_message(
+            tokens[*index - 1].column,
+            tokens[*index - 1].line,
+            "tried to get token but failed",
+            "Function",
+        )),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct FormalDecl {
     pub is_ref: bool,
@@ -14,6 +26,7 @@ pub struct FormalDecl {
 pub struct FuncDecl {
     pub rtype: TypeDecl,
     pub name: String,
+    pub ctx: Vec<VarDef>, // Shadow arguments to support functions using parent state
     pub arguments: Vec<FormalDecl>,
     // body: Vec<Stmt>,
 }
@@ -58,61 +71,70 @@ impl Display for FuncDef {
 
 impl FuncDecl {
     pub fn generate(
-        parser: &mut Parser,
+        tokens: &[Token],
+        index: &mut usize,
         symbol_table: &mut SymbolTable<TypeDecl>,
     ) -> Result<FuncDecl, Error> {
-        match parser.read_token().get_kind() {
+        let start = *index;
+        match tokens[start].kind {
             TokenKind::KDecl => {
-                let t = match parser.advance_token().get_kind() {
+                *index += 1;
+                let mut current_token = get_token(tokens, index)?;
+                let t = match current_token.kind {
                     TokenKind::Name => TypeDecl::Void,
                     TokenKind::KList | TokenKind::KInt | TokenKind::KChar | TokenKind::KBool => {
-                        TypeDecl::generate(parser)?
+                        TypeDecl::generate(tokens, index)?
                     }
                     e => {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
-                            &format!("Wrong token in Function definition: {}", e),
+                            current_token.column,
+                            current_token.line,
+                            &format!("Wrong token in Function decleration: {}", e),
                             "Ast",
                         ))
                     }
                 };
-                let name = match parser.read_token() {
+                current_token = get_token(tokens, index)?;
+
+                let name = match current_token {
                     Token {
                         kind: TokenKind::Name,
                         extra: TokenExtra::Name(n),
                         ..
                     } => {
                         let na = n.to_string();
-                        parser.advance_token();
+                        *index += 1;
+                        current_token = get_token(tokens, index)?;
                         na
                     }
                     e => {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
-                            &format!("Wrong token in Function definition: {}", e),
+                            current_token.column,
+                            current_token.line,
+                            &format!("Wrong token in Function decleration: {}", e),
                             "Ast",
                         ))
                     }
                 };
-                if parser.read_token().get_kind() != TokenKind::LParenthesis {
+                if current_token.kind != TokenKind::LParenthesis {
                     return Err(Error::with_message(
-                        parser.column,
-                        parser.line,
+                        current_token.column,
+                        current_token.line,
                         "Expected LParenthesis next to function name",
                         "Ast",
                     ));
                 }
                 let a = symbol_table.insert(&name, t.clone());
                 symbol_table.open_scope(&name);
-                let args = FormalDecl::generate(parser, symbol_table)?;
+                let args = FormalDecl::generate(tokens, index, symbol_table)?;
+                current_token = get_token(tokens, index)?;
+
                 match a {
                     Ok(()) => (),
                     Err(e) => {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
+                            current_token.column,
+                            current_token.line,
                             &format!("Ast Def: {}", e),
                             "Ast",
                         ))
@@ -122,12 +144,13 @@ impl FuncDecl {
                 Ok(FuncDecl {
                     rtype: t,
                     name,
+                    ctx: Vec::new(),
                     arguments: args,
                 })
             }
             e => Err(Error::with_message(
-                parser.column,
-                parser.line,
+                tokens[start].column,
+                tokens[start].line,
                 &format!("failed to find function decl: {}", e),
                 "Ast",
             )),
@@ -137,78 +160,84 @@ impl FuncDecl {
 
 impl FuncDef {
     pub fn generate(
-        parser: &mut Parser,
+        tokens: &[Token],
+        index: &mut usize,
         symbol_table: &mut SymbolTable<TypeDecl>,
     ) -> Result<FuncDef, Error> {
-        match parser.read_token().get_kind() {
+        let start = *index;
+        match tokens[start].kind {
             TokenKind::KDef => {
-                let t = match parser.advance_token().get_kind() {
+                *index += 1;
+                let mut current_token = get_token(tokens, index)?;
+                let t = match current_token.kind {
                     TokenKind::Name => TypeDecl::Void,
                     TokenKind::KList | TokenKind::KInt | TokenKind::KChar | TokenKind::KBool => {
-                        TypeDecl::generate(parser)?
+                        TypeDecl::generate(tokens, index)?
                     }
                     e => {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
-                            &format!("Wrong token in Function definition: {}", e),
+                            current_token.column,
+                            current_token.line,
+                            &format!("Wrong token in Function definition 1: {}", e),
                             "Ast",
                         ))
                     }
                 };
-                let name = match parser.read_token() {
+                current_token = get_token(tokens, index)?;
+                let name = match current_token {
                     Token {
                         kind: TokenKind::Name,
                         extra: TokenExtra::Name(n),
                         ..
                     } => {
                         let na = n.to_string();
-                        parser.advance_token();
+                        *index += 1;
                         na
                     }
                     e => {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
-                            &format!("Wrong token in Function definition: {}", e),
+                            current_token.column,
+                            current_token.line,
+                            &format!("Wrong token in Function definition 2: {}", e),
                             "Ast",
                         ))
                     }
                 };
-                // println!("{}", symbol_table);
+                current_token = get_token(tokens, index)?;
                 let _ = symbol_table.insert(&name, t.clone());
                 symbol_table.open_scope(&name);
-                if parser.read_token().get_kind() != TokenKind::LParenthesis {
+                if current_token.kind != TokenKind::LParenthesis {
                     return Err(Error::with_message(
-                        parser.column,
-                        parser.line,
+                        current_token.column,
+                        current_token.line,
                         "Expected LParenthesis next to function name",
                         "Ast",
                     ));
                 }
 
-                let args = FormalDecl::generate(parser, symbol_table)?;
-                match parser.read_token().get_kind() {
+                let args = FormalDecl::generate(tokens, index, symbol_table)?;
+                current_token = get_token(tokens, index)?;
+                match current_token.kind {
                     TokenKind::Colon => (),
                     e => {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
+                            current_token.column,
+                            current_token.line,
                             &format!("Function Definition end with colon, but got: {}", e),
                             "Ast",
                         ))
                     }
                 };
-                parser.advance_token();
-
+                *index += 1;
+                current_token = get_token(tokens, index)?;
                 let a = symbol_table.insert(&name, t.clone());
 
                 match a {
                     Ok(()) => (),
                     Err(e) => {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
+                            current_token.column,
+                            current_token.line,
                             &format!("Ast Def: {}", e),
                             "Ast",
                         ))
@@ -219,47 +248,81 @@ impl FuncDef {
                 let mut decls = Vec::new();
                 let mut vars = Vec::new();
                 let mut stmts = Vec::new();
-
                 loop {
-                    match parser.read_token().get_kind() {
-                        TokenKind::KDef => defs.push(FuncDef::generate(parser, symbol_table)?),
-                        TokenKind::KDecl => decls.push(FuncDecl::generate(parser, symbol_table)?),
+                    match current_token.kind {
+                        TokenKind::KDef => {
+                            defs.push(FuncDef::generate(tokens, index, symbol_table)?)
+                        }
+                        TokenKind::KDecl => {
+                            decls.push(FuncDecl::generate(tokens, index, symbol_table)?)
+                        }
                         TokenKind::KInt
                         | TokenKind::KBool
                         | TokenKind::KList
-                        | TokenKind::KChar => vars.extend(VarDef::generate(parser, symbol_table)?),
+                        | TokenKind::KChar => {
+                            vars.extend(VarDef::generate(tokens, index, symbol_table)?)
+                        }
 
                         _ => break,
                     }
+                    current_token = get_token(tokens, index)?;
                 }
-                while parser.read_token().get_kind() != TokenKind::KEnd {
-                    let stmt = Stmt::generate(parser, symbol_table)?;
-                    match stmt {
+                let mut ctx = Vec::new();
+                while current_token.kind != TokenKind::KEnd {
+                    let stmt = Stmt::generate(tokens, index, symbol_table, &mut ctx)?;
+                    match &stmt {
                         Stmt::Exit if t != TypeDecl::Void => {
                             return Err(Error::with_message(
-                                parser.column,
-                                parser.line,
+                                tokens[*index].column,
+                                tokens[*index].line,
                                 "Exit statement if not valid in function that returns a value",
                                 "Ast",
                             ))
                         }
                         Stmt::Return(..) if t == TypeDecl::Void => {
                             return Err(Error::with_message(
-                                parser.column,
-                                parser.line,
+                                tokens[*index].column,
+                                tokens[*index].line,
                                 "Return statement if not valid in function that does not return a value",
                                 "Ast",
                             ))
                         }
+                        
                         _ => (),
                     }
                     stmts.push(stmt);
+                    current_token = get_token(tokens, index)?;
                 }
-                parser.advance_token();
+                // remove from ctx all variables from the same scope
+
+                for i in 0..args.len() {
+                    let pos = ctx.iter().position(|x| x.name == args[i].def.name);
+                    if pos.is_some() {
+                        ctx.remove(pos.unwrap());
+                    }
+                }
+                for i in 0..vars.len() {
+                    let pos = ctx.iter().position(|x| x.name == vars[i].name);
+                    if pos.is_some() {
+                        ctx.remove(pos.unwrap());
+                    }
+                } 
+
+                for i in &defs {
+                    for j in &i.header.ctx {
+                        if ctx.iter().all(|x| x.name != j.name) && vars.iter().all(|x| x.name != j.name){
+                            ctx.push(j.clone());
+                        }
+                    }
+                }
+                
+                // println!("ctx of {}: {:?}", name, ctx);
+                *index += 1;
                 symbol_table.close_scope();
                 Ok(FuncDef {
                     header: FuncDecl {
                         rtype: t,
+                        ctx,
                         name,
                         arguments: args,
                     },
@@ -270,9 +333,9 @@ impl FuncDef {
                 })
             }
             _ => Err(Error::with_message(
-                parser.column,
-                parser.line,
-                &format!("failed to find function decl: {}", parser.read_token()),
+                tokens[start].column,
+                tokens[start].line,
+                &format!("failed to find function def: {}", tokens[start]),
                 "Ast",
             )),
         }
@@ -280,15 +343,17 @@ impl FuncDef {
 }
 impl FormalDecl {
     pub fn generate(
-        parser: &mut Parser,
+        tokens: &[Token],
+        index: &mut usize,
         symbol_table: &mut SymbolTable<TypeDecl>,
     ) -> Result<Vec<FormalDecl>, Error> {
-        match parser.read_token().get_kind() {
-            TokenKind::LParenthesis => parser.advance_token(),
+        let start = *index;
+        match tokens[start].kind {
+            TokenKind::LParenthesis => *index += 1,
             e => {
                 return Err(Error::with_message(
-                    parser.column,
-                    parser.line,
+                    tokens[start].column,
+                    tokens[start].line,
                     &format!(
                         "formal definitions start with parenthesis but I was given: {}",
                         e
@@ -297,21 +362,23 @@ impl FormalDecl {
                 ))
             }
         };
-        if parser.read_token().get_kind() == TokenKind::RParenthesis {
-            parser.advance_token();
+        let mut current_token = get_token(tokens, index)?;
+        if current_token.kind == TokenKind::RParenthesis {
+            *index += 1;
             return Ok(Vec::new());
         };
         let mut results = Vec::new();
         loop {
-            let is_ref = match parser.read_token().get_kind() {
+            current_token = get_token(tokens, index)?;
+            let is_ref = match current_token.kind {
                 TokenKind::KRef => {
-                    parser.advance_token();
+                    *index += 1;
                     true
                 }
                 _ => false,
             };
 
-            let defs = match VarDef::generate(parser, symbol_table) {
+            let defs = match VarDef::generate(tokens, index, symbol_table) {
                 Ok(v) => v,
                 Err(e) => return Err(e.extend("Inside formal", "Ast")),
             };
@@ -320,16 +387,18 @@ impl FormalDecl {
                 def: VarDef::new(&x.name, x.var_type.clone()),
             });
             results.extend(i);
-            match parser.read_token().get_kind() {
-                TokenKind::Semicolon => parser.advance_token(),
+
+            current_token = get_token(tokens, index)?;
+            match current_token.kind {
+                TokenKind::Semicolon => *index += 1,
                 TokenKind::RParenthesis => {
-                    parser.advance_token();
+                    *index += 1;
                     break;
                 }
                 e => {
                     return Err(Error::with_message(
-                        parser.column,
-                        parser.line,
+                        current_token.column,
+                        current_token.line,
                         &format!("unxpected token: {}", e),
                         "Ast",
                     ))

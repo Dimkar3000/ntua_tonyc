@@ -1,19 +1,20 @@
 use crate::ast::*;
 use crate::error::Error;
-use crate::parser::Parser;
+use crate::parser::{Parser, Token};
 use crate::symbol_table::SymbolTable;
 
-pub struct AstRoot<'a> {
-    pub parser: Parser<'a>,
+pub struct AstRoot {
+    pub tokens: Vec<Token>,
+    pub index: usize,
     pub symbol_table: SymbolTable<TypeDecl>,
 }
 
-impl<'a> AstRoot<'a> {
-    pub fn new(stream: &'a str) -> Self {
+impl AstRoot {
+    pub fn new(stream: &str) -> Self {
+        let mut p = Parser::new(stream);
         let mut result = AstRoot {
-            // allocator: BumpAllocator::new(),
-            parser: Parser::new(stream),
-            // current_block_name: Scope{name:"root".to_owned()},
+            index: 0,
+            tokens: p.produce(),
             symbol_table: SymbolTable::new(),
         };
         result.symbol_table.insert("abs", TypeDecl::Int).unwrap();
@@ -44,7 +45,9 @@ impl<'a> AstRoot<'a> {
     }
 
     pub fn generate(&mut self) -> Result<FuncDef, Error> {
-        self.parser.advance_token();
-        FuncDef::generate(&mut self.parser, &mut self.symbol_table)
+        if self.tokens.len() == 0 {
+            return Err(Error::with_message(0, 0, "No tokens supplied", "Ast"));
+        }
+        FuncDef::generate(&self.tokens, &mut 0, &mut self.symbol_table)
     }
 }

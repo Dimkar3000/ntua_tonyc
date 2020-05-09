@@ -10,7 +10,6 @@ def main():
         a()
     end
 
-    puts("press Enter to start:")
     tmp := getc()
     a()
 end

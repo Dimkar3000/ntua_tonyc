@@ -1,6 +1,19 @@
 use crate::error::Error;
 use crate::parser::*;
 use std::fmt::Display;
+
+fn get_token<'a>(tokens: &'a [Token], index: &mut usize) -> Result<&'a Token, Error> {
+    match tokens.get(*index) {
+        Some(k) => Ok(k),
+        None => Err(Error::with_message(
+            tokens[*index - 1].column,
+            tokens[*index - 1].line,
+            "tried to get token but failed",
+            "Typedecl",
+        )),
+    }
+}
+
 /// Typedecl is the type of a single block of code.
 #[derive(Debug, Clone)]
 pub enum TypeDecl {
@@ -52,34 +65,39 @@ impl PartialEq for TypeDecl {
     }
 }
 impl TypeDecl {
-    pub fn generate(parser: &mut Parser) -> Result<Self, Error> {
-        let mut t = match parser.read_token().get_kind() {
+    pub fn generate(tokens: &[Token], index: &mut usize) -> Result<Self, Error> {
+        let mut current_token = get_token(tokens, index)?;
+        let mut t = match current_token.kind {
             TokenKind::KInt => TypeDecl::Int,
             TokenKind::KChar => TypeDecl::Char,
             TokenKind::KBool => TypeDecl::Bool,
-            TokenKind::KList => match parser.advance_token().get_kind() {
-                TokenKind::LBracket => {
-                    parser.advance_token();
-                    let sub = TypeDecl::generate(parser);
-                    match sub {
-                        Ok(e) => TypeDecl::List(Box::new(e)),
-                        Err(e) => return Err(e),
+            TokenKind::KList => {
+                *index += 1;
+                current_token = get_token(tokens, index)?;
+                match current_token.kind {
+                    TokenKind::LBracket => {
+                        *index += 1;
+                        let sub = TypeDecl::generate(tokens, index);
+                        match sub {
+                            Ok(e) => TypeDecl::List(Box::new(e)),
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    _ => {
+                        return Err(Error::with_message(
+                            current_token.column,
+                            current_token.line,
+                            "Expected Left bracket after keyword \"List\"",
+                            "Ast",
+                        ))
                     }
                 }
-                _ => {
-                    return Err(Error::with_message(
-                        parser.column,
-                        parser.line,
-                        "Expected Left bracket after keyword \"List\"",
-                        "Ast",
-                    ))
-                }
-            },
-            TokenKind::Error => match parser.read_token().extra {
+            }
+            TokenKind::Error => match &current_token.extra {
                 TokenExtra::Error(e) => {
                     return Err(Error::with_message(
-                        parser.column,
-                        parser.line,
+                        current_token.column,
+                        current_token.line,
                         &format!("Parser: {}", e),
                         "Ast",
                     ))
@@ -89,8 +107,8 @@ impl TypeDecl {
             },
             e => {
                 return Err(Error::with_message(
-                    parser.column,
-                    parser.line,
+                    current_token.column,
+                    current_token.line,
                     &format!("Wrong type passed: \"{}\"", e),
                     "Ast",
                 ))
@@ -98,15 +116,18 @@ impl TypeDecl {
         };
         //Handle array syntax
         loop {
-            let token = parser.advance_token();
-            match token.get_kind() {
+            *index += 1;
+            current_token = get_token(tokens, index)?;
+            match current_token.kind {
                 TokenKind::LBracket => {
-                    if parser.advance_token().get_kind() == TokenKind::RBracket {
+                    *index += 1;
+                    current_token = get_token(tokens, index)?;
+                    if current_token.kind == TokenKind::RBracket {
                         t = TypeDecl::Array(Box::new(t));
                     } else {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
+                            current_token.column,
+                            current_token.line,
                             "Array definition missing Right Bracket",
                             "Ast",
                         ));
@@ -120,34 +141,40 @@ impl TypeDecl {
     }
 
     // This version won't throw an error on missing right bracket. Used for 'new int[5]' type of statements
-    pub fn generate_partial(parser: &mut Parser) -> Result<TypeDecl, Error> {
-        let mut t = match parser.read_token().get_kind() {
+    pub fn generate_partial(tokens: &[Token], index: &mut usize) -> Result<TypeDecl, Error> {
+        let start = *index;
+        let mut current_token = &tokens[start];
+        let mut t = match current_token.kind {
             TokenKind::KInt => TypeDecl::Int,
             TokenKind::KChar => TypeDecl::Char,
             TokenKind::KBool => TypeDecl::Bool,
-            TokenKind::KList => match parser.advance_token().get_kind() {
-                TokenKind::LBracket => {
-                    parser.advance_token();
-                    let sub = TypeDecl::generate(parser);
-                    match sub {
-                        Ok(e) => TypeDecl::List(Box::new(e)),
-                        Err(e) => return Err(e),
+            TokenKind::KList => {
+                *index += 1;
+                current_token = get_token(tokens, index)?;
+                match current_token.kind {
+                    TokenKind::LBracket => {
+                        *index += 1;
+                        let sub = TypeDecl::generate(tokens, index);
+                        match sub {
+                            Ok(e) => TypeDecl::List(Box::new(e)),
+                            Err(e) => return Err(e),
+                        }
+                    }
+                    _ => {
+                        return Err(Error::with_message(
+                            current_token.column,
+                            current_token.line,
+                            "Expected Left bracket after keyword \"List\"",
+                            "Ast",
+                        ))
                     }
                 }
-                _ => {
-                    return Err(Error::with_message(
-                        parser.column,
-                        parser.line,
-                        "Expected Left bracket after keyword \"List\"",
-                        "Ast",
-                    ))
-                }
-            },
-            TokenKind::Error => match parser.read_token().extra {
+            }
+            TokenKind::Error => match &current_token.extra {
                 TokenExtra::Error(e) => {
                     return Err(Error::with_message(
-                        parser.column,
-                        parser.line,
+                        current_token.column,
+                        current_token.line,
                         &format!("Parser: {}", e),
                         "Ast",
                     ))
@@ -157,8 +184,8 @@ impl TypeDecl {
             },
             e => {
                 return Err(Error::with_message(
-                    parser.column,
-                    parser.line,
+                    current_token.column,
+                    current_token.line,
                     &format!("Wrong type passed: \"{}\"", e),
                     "Ast",
                 ))
@@ -166,10 +193,13 @@ impl TypeDecl {
         };
         //Handle array syntax
         loop {
-            let token = parser.advance_token();
-            match token.get_kind() {
+            *index += 1;
+            current_token = get_token(tokens, index)?;
+            match current_token.kind {
                 TokenKind::LBracket => {
-                    if parser.advance_token().get_kind() == TokenKind::RBracket {
+                    *index += 1;
+                    current_token = get_token(tokens, index)?;
+                    if current_token.kind == TokenKind::RBracket {
                         t = TypeDecl::Array(Box::new(t));
                     } else {
                         return Ok(TypeDecl::Array(Box::new(t)));
@@ -179,6 +209,6 @@ impl TypeDecl {
             }
         }
         // parser.get_token();
-        Err(Error::with_message(parser.column, parser.line, "partial Type should end on open LBracket because an expression of its size is next. ONLY USED for memory initialization of arrays","Ast"))
+        Err(Error::with_message(current_token.column, current_token.line, "partial Type should end on open LBracket because an expression of its size is next. ONLY USED for memory initialization of arrays","Ast"))
     }
 }

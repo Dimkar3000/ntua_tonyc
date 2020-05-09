@@ -1,10 +1,23 @@
 use crate::ast::atomic::Atomic;
+use crate::ast::var_def::VarDef;
 use crate::ast::TypeDecl;
 use crate::error::Error;
 use crate::parser::TokenKind;
 use crate::parser::*;
 use crate::symbol_table::SymbolTable;
 use std::fmt::Display;
+
+fn get_token<'a>(tokens: &'a [Token], index: &mut usize) -> Result<&'a Token, Error> {
+    match tokens.get(*index) {
+        Some(k) => Ok(k),
+        None => Err(Error::with_message(
+            tokens[*index - 1].column,
+            tokens[*index - 1].line,
+            "tried to get token but failed",
+            "Expr",
+        )),
+    }
+}
 
 /// a basic coding block that represents an expression that return data of any type
 #[derive(Debug, Clone, PartialEq)]
@@ -141,6 +154,7 @@ impl Expr {
         if left.is_none() {
             return Ok(right);
         }
+
         let left = left.unwrap();
         let high =
             |t| t == TokenKind::Multiplication || t == TokenKind::Division || t == TokenKind::KMod;
@@ -151,6 +165,16 @@ impl Expr {
         };
         // All the cases possible some more
         match ((*left).clone(), right) {
+            (Expr::Head(t, d), Expr::Comparison(t0, None, None)) => {
+                Ok(Expr::Comparison(t0, Some(Expr::Head(t, d).bx()), None))
+            }
+            (Expr::NilCheck(d), Expr::Comparison(t0, None, None)) => {
+                Ok(Expr::Comparison(t0, Some(Expr::NilCheck(d).bx()), None))
+            }
+            (Expr::Tail(t, d), Expr::Comparison(t0, None, None)) => {
+                Ok(Expr::Comparison(t0, Some(Expr::Tail(t, d).bx()), None))
+            }
+
             // Bool is valid on the left only when followed by a comparison operator
             (Expr::Unary(TokenKind::Subtraction, None), Expr::CInt(n)) => Ok(Expr::CInt(-n)),
             (Expr::Unary(TokenKind::Addition, None), Expr::CInt(n)) => Ok(Expr::CInt(n)),
@@ -249,32 +273,39 @@ impl Expr {
                     Err(_) => Err(*left),
                 }
             }
+            (Expr::Comparison(t, Some(a), None), b) if a.get_type() == b.get_type() => {
+                Ok(Expr::Comparison(t, Some(a), Some(b.bx())))
+            }
             _ => Err(*left),
         }
     }
 
     /// Generate a new Expression from a parser and a symbol_table
     pub fn generate(
-        parser: &mut Parser,
+        tokens: &[Token],
+        index: &mut usize,
         symbol_table: &mut SymbolTable<TypeDecl>,
         is_paranthesis: bool,
+        only_parenthesis: bool,
+        ctx_table: &mut Vec<VarDef>,
     ) -> Result<Expr, Error> {
         let mut result: Option<Box<Expr>> = None;
         // let current_error;
+        let mut current_token;
         loop {
-            let token = parser.read_token();
-            let right = match token.get_kind() {
+            current_token = get_token(tokens, index)?;
+            let right = match current_token.kind {
                 TokenKind::KTrue => {
-                    parser.advance_token();
+                    *index += 1;
                     Expr::CBool(true)
                 }
                 TokenKind::KFalse => {
-                    parser.advance_token();
+                    *index += 1;
                     Expr::CBool(false)
                 }
                 TokenKind::Addition | TokenKind::Subtraction => {
-                    let token = parser.read_token().get_kind();
-                    parser.advance_token();
+                    let token = current_token.kind;
+                    *index += 1;
                     if result.is_none() {
                         Expr::Unary(token, None)
                     } else {
@@ -282,7 +313,7 @@ impl Expr {
                     }
                 }
                 TokenKind::Name => {
-                    let n = parser.read_token().get_name().unwrap();
+                    let n = current_token.get_name().unwrap();
                     let t = symbol_table.lookup(n);
                     if t.is_some() && t.unwrap() == &TypeDecl::Void {
                         // function that returns void
@@ -291,33 +322,34 @@ impl Expr {
                         if result.is_some() && result.as_ref().unwrap().is_valid() {
                             break;
                         }
-                        let atom = Atomic::generate(parser, symbol_table)?;
+                        let atom = Atomic::generate(tokens, index, symbol_table, ctx_table)?;
+                        current_token = get_token(tokens, index)?;
                         // parser.back();
                         Expr::Atomic(atom.get_type(), atom)
                     }
                 }
                 TokenKind::CString => {
-                    let atom = Atomic::generate(parser, symbol_table)?;
+                    let atom = Atomic::generate(tokens, index, symbol_table, ctx_table)?;
                     Expr::Atomic(atom.get_type(), atom)
                 }
                 TokenKind::CChar => {
-                    let c = Expr::CChar(token.get_cchar().unwrap());
-                    parser.advance_token();
+                    let c = Expr::CChar(current_token.get_cchar().unwrap());
+                    *index += 1;
                     c
                 }
                 TokenKind::INT => {
-                    let n = Expr::CInt(token.get_int().unwrap());
-                    parser.advance_token();
+                    let n = Expr::CInt(current_token.get_int().unwrap());
+                    *index += 1;
                     n
                 }
                 TokenKind::Multiplication | TokenKind::Division | TokenKind::KMod => {
-                    let kind = token.get_kind();
-                    parser.advance_token();
+                    let kind = current_token.kind;
+                    *index += 1;
                     Expr::Binary(kind, None, None)
                 }
                 TokenKind::KAnd | TokenKind::KOr => {
-                    let kind = token.get_kind();
-                    parser.advance_token();
+                    let kind = current_token.kind;
+                    *index += 1;
                     Expr::Logical(kind, None, None)
                 }
                 TokenKind::Equal
@@ -326,33 +358,67 @@ impl Expr {
                 | TokenKind::LessOrEqual
                 | TokenKind::Great
                 | TokenKind::GreatOrEqual => {
-                    let kind = token.get_kind();
-                    parser.advance_token();
+                    let kind = current_token.kind;
+                    *index += 1;
                     Expr::Comparison(kind, None, None)
                 }
                 TokenKind::KNot => {
-                    parser.advance_token();
+                    *index += 1;
                     Expr::Negation(None)
                 }
                 TokenKind::LParenthesis => {
-                    parser.advance_token();
-                    let r = Expr::generate(parser, symbol_table, true)?;
+                    *index += 1;
+                    let r = Expr::generate(
+                        tokens,
+                        index,
+                        symbol_table,
+                        true,
+                        only_parenthesis,
+                        ctx_table,
+                    )?;
+                    current_token = get_token(tokens, index)?;
                     match Expr::match_expr(result, r) {
                         Ok(k) => {
-                            result = Some(k.bx());
-                            continue;
+                            if only_parenthesis {
+                                if k.is_valid() {
+                                    return Ok(k);
+                                } else {
+                                    return Err(Error::with_message(
+                                        current_token.column,
+                                        current_token.line,
+                                        "only parenthesis requires that insinde it is valid",
+                                        "Expr",
+                                    ));
+                                }
+                            } else {
+                                result = Some(k.bx());
+                                continue;
+                            }
                         }
                         Err(e) => {
-                            result = Some(e.bx());
-                            break;
+                            if only_parenthesis {
+                                if e.is_valid() {
+                                    return Ok(e);
+                                } else {
+                                    return Err(Error::with_message(
+                                        current_token.column,
+                                        current_token.line,
+                                        "only parenthesis requires that insinde it is valid",
+                                        "Expr",
+                                    ));
+                                }
+                            } else {
+                                result = Some(e.bx());
+                                break;
+                            }
                         }
                     }
                 }
                 TokenKind::RBracket => {
                     if result.is_none() {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
+                            current_token.column,
+                            current_token.line,
                             "Rbracket without anything",
                             "Expr",
                         ));
@@ -360,8 +426,8 @@ impl Expr {
                     let r = result.unwrap();
                     if !r.is_valid() {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
+                            current_token.column,
+                            current_token.line,
                             &format!("Invalid Expression followed by RBracket: {}", r),
                             "Expr",
                         ));
@@ -371,8 +437,8 @@ impl Expr {
                 TokenKind::RParenthesis => {
                     if result.is_none() {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
+                            current_token.column,
+                            current_token.line,
                             "RParenthesis without anything",
                             "Expr",
                         ));
@@ -380,13 +446,13 @@ impl Expr {
                     let r = result.unwrap();
                     if !r.is_valid() || !is_paranthesis {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
+                            current_token.column,
+                            current_token.line,
                             &format!("Invalid Expression inside parenthesis: {}", r),
                             "Expr",
                         ));
                     }
-                    parser.advance_token();
+                    *index += 1;
                     return Ok(*r);
                 }
                 TokenKind::Empty => {
@@ -395,16 +461,16 @@ impl Expr {
                             return Ok(*r);
                         } else {
                             return Err(Error::with_message(
-                                parser.column,
-                                parser.line,
+                                current_token.column,
+                                current_token.line,
                                 "invalid expression with empty",
                                 "Expr",
                             ));
                         }
                     } else {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
+                            current_token.column,
+                            current_token.line,
                             "invalid expression with empty None",
                             "Expr",
                         ));
@@ -413,51 +479,63 @@ impl Expr {
                 TokenKind::KNil => {
                     if let Some(r) = result {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
-                            &format!("nil shouldn't follow {}", r),
+                            current_token.column,
+                            current_token.line,
+                            &format!("nil shouldn't follow {:?}", r),
                             "Expr",
                         ));
                     } else {
-                        parser.advance_token();
+                        *index += 1;
                         Expr::CNil
                     }
                 }
                 TokenKind::KNilQ => {
-                    if parser.advance_token().get_kind() == TokenKind::LParenthesis {
+                    *index += 1;
+                    current_token = get_token(tokens, index)?;
+                    if current_token.kind == TokenKind::LParenthesis {
                         // parser.get_token();
-                        let s = Expr::generate(parser, symbol_table, is_paranthesis)?;
+                        *index += 1;
+                        let s = Expr::generate(tokens, index, symbol_table, true, true, ctx_table)?;
+                        current_token = get_token(tokens, index)?;
                         if let Expr::CNil = s {
-                            return Ok(Expr::CBool(true));
-                        }
-                        match s.get_type() {
-                            TypeDecl::List(_) => Expr::NilCheck(s.bx()),
-                            e => {
-                                return Err(Error::with_message(
-                                    parser.column,
-                                    parser.line,
-                                    &format!("nil shouldn't follow {} h", e),
-                                    "Expr",
-                                ))
+                            Expr::CBool(true)
+                        } else {
+                            match s.get_type() {
+                                TypeDecl::List(_) => Expr::NilCheck(s.bx()),
+                                e => {
+                                    return Err(Error::with_message(
+                                        current_token.column,
+                                        current_token.line,
+                                        &format!("nil? shouldn't follow {}", e),
+                                        "Expr",
+                                    ))
+                                }
                             }
                         }
                     } else {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
-                            "nil? should be followed by left parenthesis",
+                            current_token.column,
+                            current_token.line,
+                            &format!(
+                                "nil? should be followed by left parenthesis, but instead got: {}",
+                                current_token
+                            ),
                             "Expr",
                         ));
                     }
                 }
                 TokenKind::KHead => {
-                    if parser.advance_token().get_kind() == TokenKind::LParenthesis {
+                    *index += 1;
+                    current_token = get_token(tokens, index)?;
+                    if current_token.kind == TokenKind::LParenthesis {
                         // parser.get_token();
-                        let s = Expr::generate(parser, symbol_table, is_paranthesis)?;
+                        let s =
+                            Expr::generate(tokens, index, symbol_table, false, true, ctx_table)?;
+                        current_token = get_token(tokens, index)?;
                         if let Expr::CNil = s {
                             return Err(Error::with_message(
-                                parser.column,
-                                parser.line,
+                                current_token.column,
+                                current_token.line,
                                 "cannot get the head of empty list",
                                 "Expr",
                             ));
@@ -466,30 +544,34 @@ impl Expr {
                             TypeDecl::List(t) => Expr::Head(*t, s.bx()),
                             e => {
                                 return Err(Error::with_message(
-                                    parser.column,
-                                    parser.line,
-                                    &format!("nil shouldn't follow {} h", e),
+                                    current_token.column,
+                                    current_token.line,
+                                    &format!("head shouldn't follow by {}", e),
                                     "Expr",
                                 ))
                             }
                         }
                     } else {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
-                            "nil? should be followed by left parenthesis",
+                            current_token.column,
+                            current_token.line,
+                            "head should be followed by left parenthesis",
                             "Expr",
                         ));
                     }
                 }
                 TokenKind::KTail => {
-                    if parser.advance_token().get_kind() == TokenKind::LParenthesis {
+                    *index += 1;
+                    current_token = get_token(tokens, index)?;
+                    if current_token.kind == TokenKind::LParenthesis {
                         // parser.get_token();
-                        let s = Expr::generate(parser, symbol_table, is_paranthesis)?;
+                        let s =
+                            Expr::generate(tokens, index, symbol_table, false, true, ctx_table)?;
+                        current_token = get_token(tokens, index)?;
                         if let Expr::CNil = s {
                             return Err(Error::with_message(
-                                parser.column,
-                                parser.line,
+                                current_token.column,
+                                current_token.line,
                                 "cannot get the tail of empty list",
                                 "Expr",
                             ));
@@ -498,35 +580,41 @@ impl Expr {
                             TypeDecl::List(t) => Expr::Tail(TypeDecl::List(t), s.bx()),
                             e => {
                                 return Err(Error::with_message(
-                                    parser.column,
-                                    parser.line,
-                                    &format!("nil shouldn't follow {} h", e),
+                                    current_token.column,
+                                    current_token.line,
+                                    &format!("tail shouldn't follow {} h", e),
                                     "Expr",
                                 ))
                             }
                         }
                     } else {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
+                            current_token.column,
+                            current_token.line,
                             "nil? should be followed by left parenthesis",
                             "Expr",
                         ));
                     }
                 }
                 TokenKind::KNew => {
-                    parser.advance_token();
-                    let ctype = TypeDecl::generate_partial(parser)?;
-                    let s = Expr::generate(parser, symbol_table, is_paranthesis)?;
-                    if parser.read_token().get_kind() == TokenKind::RBracket
-                        && s.get_type() == TypeDecl::Int
-                    {
-                        parser.advance_token();
+                    *index += 1;
+                    let ctype = TypeDecl::generate_partial(tokens, index)?;
+                    let s = Expr::generate(
+                        tokens,
+                        index,
+                        symbol_table,
+                        is_paranthesis,
+                        false,
+                        ctx_table,
+                    )?;
+                    current_token = get_token(tokens, index)?;
+                    if current_token.kind == TokenKind::RBracket && s.get_type() == TypeDecl::Int {
+                        *index += 1;
                         return Ok(Expr::NewArray(ctype, s.bx()));
                     } else {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
+                            current_token.column,
+                            current_token.line,
                             "new array definition mistake",
                             "Expr",
                         ));
@@ -535,15 +623,23 @@ impl Expr {
                 TokenKind::Hash => {
                     if let Some(head) = result {
                         if head.is_valid() {
-                            parser.advance_token();
-                            let tail = Expr::generate(parser, symbol_table, is_paranthesis)?;
+                            *index += 1;
+                            let tail = Expr::generate(
+                                tokens,
+                                index,
+                                symbol_table,
+                                is_paranthesis,
+                                false,
+                                ctx_table,
+                            )?;
+                            current_token = get_token(tokens, index)?;
                             match tail.get_type() {
                                 TypeDecl::Nil => {
                                     return Ok(Expr::Hash(
                                         TypeDecl::List(Box::new(head.get_type())),
                                         head.bx(),
                                         tail.bx(),
-                                    ))
+                                    ));
                                 }
 
                                 TypeDecl::List(t) if Box::new(head.get_type()) == t => {
@@ -552,8 +648,8 @@ impl Expr {
 
                                 _ => {
                                     return Err(Error::with_message(
-                                        parser.column,
-                                        parser.line,
+                                        current_token.column,
+                                        current_token.line,
                                         &format!("Invalid hash expration: {} # {}", head, tail),
                                         "Expr",
                                     ))
@@ -562,16 +658,16 @@ impl Expr {
                         // return Ok(Expr::Hash(r.get_type(), Some(r.bx()),Some(t.bx())));
                         } else {
                             return Err(Error::with_message(
-                                parser.column,
-                                parser.line,
+                                current_token.column,
+                                current_token.line,
                                 "invalid expression with empty",
                                 "Expr",
                             ));
                         }
                     } else {
                         return Err(Error::with_message(
-                            parser.column,
-                            parser.line,
+                            current_token.column,
+                            current_token.line,
                             "invalid expression with empty None",
                             "Expr",
                         ));
@@ -579,30 +675,29 @@ impl Expr {
                 }
                 TokenKind::Error => {
                     return Err(Error::with_message(
-                        parser.column,
-                        parser.line,
-                        &token.get_error().unwrap(),
+                        current_token.column,
+                        current_token.line,
+                        &current_token.get_error().unwrap(),
                         "Parser",
                     ));
                 }
                 e if result.is_none() => {
                     return Err(Error::with_message(
-                        parser.column,
-                        parser.line,
+                        current_token.column,
+                        current_token.line,
                         &format!("unexpected token: {}", e),
                         "Expr",
                     ))
                 }
                 _ => break,
             };
-
             match Expr::match_expr(result, right) {
                 Ok(k) => {
                     result = Some(k.bx());
                 }
                 Err(p) => {
                     result = Some(p.bx());
-                    parser.back();
+                    *index -= 1;
                     break;
                 }
             }
@@ -612,16 +707,16 @@ impl Expr {
                 Ok(*r)
             } else {
                 Err(Error::with_message(
-                    parser.column,
-                    parser.line,
+                    current_token.column,
+                    current_token.line,
                     "Invalid expression",
                     "Expr",
                 ))
             }
         } else {
             Err(Error::with_message(
-                parser.column,
-                parser.line,
+                current_token.column,
+                current_token.line,
                 "failed to parse expression",
                 "Expr",
             ))
