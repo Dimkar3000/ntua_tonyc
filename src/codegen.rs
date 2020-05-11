@@ -1006,87 +1006,52 @@ impl<'ctx> CodeGen<'ctx> {
                     self.create_typed_nil(&ctype, true)
                 } else {
                     // Copy data to new ptr
-                    let gc_malloc = self.module.get_function("GC_malloc").unwrap();
-                    let size = self.typed_size_of(&ctype).unwrap();
-                    let data = self
-                        .builder
-                        .build_call(gc_malloc, &[size.into()], "gc_malloc_d");
                     let p = self
                         .builder
-                        .build_bitcast(
-                            data.try_as_basic_value().left().unwrap(),
-                            ctype.into_pointer_type(),
-                            "cast_gc",
+                        .build_malloc(
+                            ctype
+                                .into_pointer_type()
+                                .get_element_type()
+                                .into_struct_type(),
+                            "malloc_t",
                         )
-                        .into_pointer_value();
+                        .unwrap();
                     let tail_data = self
                         .builder
                         .build_load(tail_data.into_pointer_value(), "ll");
                     self.builder.build_store(p, tail_data);
                     p.into()
                 };
-                let gc_malloc = self.module.get_function("GC_malloc").unwrap();
-                let size = self.typed_size_of(&ctype).unwrap();
-                let gc_data = self
-                    .builder
-                    .build_call(gc_malloc, &[size.into()], "gc_malloc_d");
                 let head = self
                     .builder
-                    .build_bitcast(
-                        gc_data.try_as_basic_value().left().unwrap(),
-                        ctype.into_pointer_type(),
-                        "cast_gc",
+                    .build_malloc(
+                        ctype
+                            .into_pointer_type()
+                            .get_element_type()
+                            .into_struct_type(),
+                        "malloc_h",
                     )
-                    .into_pointer_value();
+                    .unwrap();
                 let data_ptr = self.builder.build_struct_gep(head, 0, "data").unwrap();
                 self.builder.build_store(data_ptr, data);
-                let flag = self
-                    .builder
-                    .build_struct_gep(head, 2, "flag")
-                    .unwrap();
+                let flag = self.builder.build_struct_gep(head, 2, "flag").unwrap();
                 self.builder
                     .build_store(flag, self.context.bool_type().const_int(0, false));
 
                 //tail
-                let tail_ptr = unsafe {
-                    self.builder.build_in_bounds_gep(
-                        head,
-                        &[
-                            self.context.i32_type().const_int(0, false),
-                            self.context.i32_type().const_int(1, false),
-                        ],
-                        "data",
-                    )
-                };
+                let tail_ptr = self.builder.build_struct_gep(head, 1, "data").unwrap();
                 self.builder.build_store(tail_ptr, tail);
 
                 //flag
-                let is_null_ptr = unsafe {
-                    self.builder.build_in_bounds_gep(
-                        head,
-                        &[
-                            self.context.i32_type().const_int(0, false),
-                            self.context.i32_type().const_int(2, false),
-                        ],
-                        "data",
-                    )
-                };
+                let is_null_ptr = self.builder.build_struct_gep(head, 2, "data").unwrap();
                 self.builder
                     .build_store(is_null_ptr, self.context.bool_type().const_int(0, false));
                 if is_ref {
-                    let size = self
-                        .typed_size_of(&head.get_type().ptr_type(AddressSpace::Generic).into())
-                        .unwrap();
-                    let gc_data = self
+                    let ptr = self
                         .builder
-                        .build_call(gc_malloc, &[size.into()], "gc_malloc_d");
-                    let ptr = self.builder.build_bitcast(
-                        gc_data.try_as_basic_value().left().unwrap(),
-                        head.get_type().ptr_type(AddressSpace::Generic),
-                        "cast_gc",
-                    );
-                    self.builder.build_store(ptr.into_pointer_value(), head);
-                    ptr
+                        .build_alloca(head.get_type().ptr_type(AddressSpace::Generic), "lh");
+                    self.builder.build_store(ptr, head);
+                    ptr.into()
                 } else {
                     head.into()
                 }
@@ -1117,20 +1082,11 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap();
                 let ptr = self.builder.build_load(t, "tail");
                 if is_ref {
-                    let gc_malloc = self.module.get_function("GC_malloc").unwrap();
-                    let size = self
-                        .typed_size_of(&ptr.get_type().ptr_type(AddressSpace::Generic).into())
-                        .unwrap();
-                    let gc_data = self
+                    let n = self
                         .builder
-                        .build_call(gc_malloc, &[size.into()], "gc_malloc_d");
-                    let n = self.builder.build_bitcast(
-                        gc_data.try_as_basic_value().left().unwrap(),
-                        ptr.get_type().ptr_type(AddressSpace::Generic),
-                        "cast_gc",
-                    );
-                    self.builder.build_store(n.into_pointer_value(), ptr);
-                    n
+                        .build_alloca(ptr.get_type().ptr_type(AddressSpace::Generic), "lf");
+                    self.builder.build_store(n, ptr);
+                    n.into()
                 } else {
                     ptr.into()
                 }
