@@ -6,10 +6,11 @@ def test ():
         for i := 1; i <= size; i := i+1:
             result := i # result
         end
+        
         return result
     end
     def print_list (list[int] l):
-        for skip; nil?(l); l := tail(l):
+        for skip; not nil?(l); l := tail(l):
             puti(head(l))
             puts(" ")
         end
@@ -43,12 +44,14 @@ def test ():
     list[int] l, r
     int i
     for i := 1; i < 1000; i := i+1:
+
         l := make_list(i)
-        if i < 10:
+
+        if i < 20:
             print_list(l)
         end
         r := revert_list(l)
-        if i < 10:
+        if i < 20:
             print_list(r)
         end
         if not check_lists(i, l, r):

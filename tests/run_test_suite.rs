@@ -1,8 +1,6 @@
 use inkwell::context::Context;
 use libtonyc::ast::*;
 use libtonyc::codegen::CodeGen;
-use std::error::Error;
-use std::io::prelude::*;
 use std::path::Path;
 use std::process::Command;
 
@@ -33,7 +31,7 @@ fn rust_test_suite() {
         let mut ast = read_file(p);
         let context = Context::create();
         let module = context.create_module("main");
-        let mut codegen = CodeGen::new(&context, module);
+        let codegen = CodeGen::new(&context, module);
         assert!(codegen.is_ok());
         let mut codegen = codegen.unwrap();
         let path = Path::new(p);

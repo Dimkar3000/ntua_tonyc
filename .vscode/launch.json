@@ -9,7 +9,7 @@
       "type": "cppvsdbg",
       "request": "launch",
       "program": "${workspaceFolder}/target/debug/tonyc.exe",
-      "args": ["files/examples/ok/higher_scoper_variable.tony"],
+      "args": ["files/examples/ok/gc_test.tony"],
       // "args": ["files/examples/ok/q_sort.tony"],
       "stopAtEntry": false,
       "cwd": "${workspaceFolder}",

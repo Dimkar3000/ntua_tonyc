@@ -60,7 +60,18 @@ impl<'ctx> CodeGen<'ctx> {
             BasicTypeEnum::ArrayType(v) => v.size_of(),
             BasicTypeEnum::IntType(v) => v.size_of(),
             BasicTypeEnum::FloatType(v) => v.size_of(),
-            BasicTypeEnum::PointerType(v) => v.size_of(),
+            BasicTypeEnum::PointerType(v) => match &v.get_element_type() {
+                AnyTypeEnum::ArrayType(v) => v.size_of(),
+                AnyTypeEnum::IntType(v) => v.size_of(),
+                AnyTypeEnum::FloatType(v) => v.size_of(),
+                AnyTypeEnum::PointerType(v) => v.size_of(),
+                AnyTypeEnum::StructType(v) => v.size_of(),
+                AnyTypeEnum::VectorType(v) => v.size_of(),
+                AnyTypeEnum::VoidType(e) => unreachable!("a pointer to what? : {:?}", e),
+                AnyTypeEnum::FunctionType(e) => {
+                    unreachable!("function pointer not used in this language: {:?}", e)
+                }
+            },
             BasicTypeEnum::StructType(v) => v.size_of(),
             BasicTypeEnum::VectorType(v) => v.size_of(),
         }
@@ -91,7 +102,7 @@ impl<'ctx> CodeGen<'ctx> {
             TypeDecl::List(t) => {
                 let type_name = format!("list_{}", self.typdecl_str(t));
                 match self.module.get_struct_type(&type_name) {
-                    Some(k) => k.into(),
+                    Some(k) => k.ptr_type(AddressSpace::Generic).into(),
                     None => {
                         let data = self.typedecl_to_type(t);
                         let node = self.context.opaque_struct_type(&type_name);
@@ -104,7 +115,7 @@ impl<'ctx> CodeGen<'ctx> {
                             true,
                         );
                         assert!(is_opaque);
-                        node.into()
+                        node.ptr_type(AddressSpace::Generic).into()
                     }
                 }
             }
@@ -475,8 +486,6 @@ impl<'ctx> CodeGen<'ctx> {
         };
         if !r.status.success() {
             let message = String::from_utf8(r.stderr).unwrap();
-            println!("Linking failed");
-            println!("{}", message);
             return Err(Error::with_message(0, 0, &message, "Codegen"));
         }
         println!("Linking: {:.5} secs", now.elapsed().as_secs_f64());
@@ -946,33 +955,35 @@ impl<'ctx> CodeGen<'ctx> {
         is_ref: bool,
     ) -> BasicValueEnum<'ctx> {
         let gc_malloc = self.module.get_function("GC_malloc").unwrap();
-        let size = ctype.into_struct_type().size_of().unwrap().into();
+        let size = ctype
+            .into_pointer_type()
+            .get_element_type()
+            .into_struct_type()
+            .size_of()
+            .unwrap()
+            .into();
         let data = self.builder.build_call(gc_malloc, &[size], "gc_malloc_d");
         let new_tail = self
             .builder
             .build_bitcast(
                 data.try_as_basic_value().left().unwrap(),
-                ctype.into_struct_type().ptr_type(AddressSpace::Generic),
+                ctype.into_pointer_type(),
                 "cast_gc",
             )
             .into_pointer_value();
 
-        let flag = unsafe {
-            self.builder.build_in_bounds_gep(
-                new_tail,
-                &[
-                    self.context.i32_type().const_int(0, false),
-                    self.context.i32_type().const_int(2, false),
-                ],
-                "flag",
-            )
-        };
+        let flag = self.builder.build_struct_gep(new_tail, 2, "flag").unwrap();
         self.builder
             .build_store(flag, self.context.bool_type().const_int(1, false));
         if is_ref {
-            new_tail.into()
+            let p = self
+                .builder
+                .build_alloca(new_tail.get_type(), "ref_nil")
+                .into();
+            self.builder.build_store(p, new_tail);
+            p.into()
         } else {
-            self.builder.build_load(new_tail, "d")
+            new_tail.into()
         }
     }
 
@@ -987,6 +998,7 @@ impl<'ctx> CodeGen<'ctx> {
                 let ctype = self.typedecl_to_type(t);
                 let data = self.compile_exp(left, false, var_list);
                 let tail_data = self.compile_exp(right, false, var_list);
+
                 let tail = if tail_data.get_type().is_pointer_type()
                     && tail_data.into_pointer_value().is_null()
                     && tail_data.into_pointer_value().is_const()
@@ -1003,11 +1015,13 @@ impl<'ctx> CodeGen<'ctx> {
                         .builder
                         .build_bitcast(
                             data.try_as_basic_value().left().unwrap(),
-                            ctype.into_struct_type().ptr_type(AddressSpace::Generic),
+                            ctype.into_pointer_type(),
                             "cast_gc",
                         )
                         .into_pointer_value();
-
+                    let tail_data = self
+                        .builder
+                        .build_load(tail_data.into_pointer_value(), "ll");
                     self.builder.build_store(p, tail_data);
                     p.into()
                 };
@@ -1020,21 +1034,18 @@ impl<'ctx> CodeGen<'ctx> {
                     .builder
                     .build_bitcast(
                         gc_data.try_as_basic_value().left().unwrap(),
-                        ctype.into_struct_type().ptr_type(AddressSpace::Generic),
+                        ctype.into_pointer_type(),
                         "cast_gc",
                     )
                     .into_pointer_value();
-                let data_ptr = unsafe {
-                    self.builder.build_in_bounds_gep(
-                        head,
-                        &[
-                            self.context.i32_type().const_int(0, false),
-                            self.context.i32_type().const_int(0, false),
-                        ],
-                        "data",
-                    )
-                };
+                let data_ptr = self.builder.build_struct_gep(head, 0, "data").unwrap();
                 self.builder.build_store(data_ptr, data);
+                let flag = self
+                    .builder
+                    .build_struct_gep(head, 2, "flag")
+                    .unwrap();
+                self.builder
+                    .build_store(flag, self.context.bool_type().const_int(0, false));
 
                 //tail
                 let tail_ptr = unsafe {
@@ -1063,16 +1074,29 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder
                     .build_store(is_null_ptr, self.context.bool_type().const_int(0, false));
                 if is_ref {
-                    head.into()
+                    let size = self
+                        .typed_size_of(&head.get_type().ptr_type(AddressSpace::Generic).into())
+                        .unwrap();
+                    let gc_data = self
+                        .builder
+                        .build_call(gc_malloc, &[size.into()], "gc_malloc_d");
+                    let ptr = self.builder.build_bitcast(
+                        gc_data.try_as_basic_value().left().unwrap(),
+                        head.get_type().ptr_type(AddressSpace::Generic),
+                        "cast_gc",
+                    );
+                    self.builder.build_store(ptr.into_pointer_value(), head);
+                    ptr
                 } else {
-                    self.builder.build_load(head, "deref")
+                    head.into()
                 }
             }
             Expr::NilCheck(x) => {
                 let s = self.compile_exp(x, true, var_list);
+                let s = self.builder.build_load(s.into_pointer_value(), "tmtnilq");
                 let flag = self
                     .builder
-                    .build_struct_gep(s.into_pointer_value(), 2 as u32, "flag")
+                    .build_struct_gep(s.into_pointer_value(), 2, "flag")
                     .unwrap();
                 let v = self.builder.build_load(flag, "load_f");
                 self.builder
@@ -1086,25 +1110,37 @@ impl<'ctx> CodeGen<'ctx> {
             }
             Expr::Tail(_, exp) => {
                 let s = self.compile_exp(exp, true, var_list);
-                let t = unsafe {
-                    self.builder.build_in_bounds_gep(
-                        s.into_pointer_value(),
-                        &[
-                            self.context.i32_type().const_int(0, false),
-                            self.context.i32_type().const_int(1, false),
-                        ],
-                        "data",
-                    )
-                };
+                let s = self.builder.build_load(s.into_pointer_value(), "tmtnilq");
+                let t = self
+                    .builder
+                    .build_struct_gep(s.into_pointer_value(), 1, "data")
+                    .unwrap();
                 let ptr = self.builder.build_load(t, "tail");
                 if is_ref {
-                    ptr
+                    let gc_malloc = self.module.get_function("GC_malloc").unwrap();
+                    let size = self
+                        .typed_size_of(&ptr.get_type().ptr_type(AddressSpace::Generic).into())
+                        .unwrap();
+                    let gc_data = self
+                        .builder
+                        .build_call(gc_malloc, &[size.into()], "gc_malloc_d");
+                    let n = self.builder.build_bitcast(
+                        gc_data.try_as_basic_value().left().unwrap(),
+                        ptr.get_type().ptr_type(AddressSpace::Generic),
+                        "cast_gc",
+                    );
+                    self.builder.build_store(n.into_pointer_value(), ptr);
+                    n
                 } else {
-                    self.builder.build_load(ptr.into_pointer_value(), "data")
+                    ptr.into()
                 }
             }
             Expr::Head(_t, exp) => {
                 let list = self.compile_exp(exp, true, var_list);
+                assert!(list.is_pointer_value());
+                let list = self
+                    .builder
+                    .build_load(list.into_pointer_value(), "head_tmt");
                 assert!(list.is_pointer_value());
                 let element = self
                     .builder

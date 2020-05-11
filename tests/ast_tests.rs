@@ -1,5 +1,4 @@
 use libtonyc::ast::{AstRoot, FuncDef};
-use libtonyc::codegen::CodeGen;
 use libtonyc::error::Error;
 
 fn read_file(path: &str) -> Result<FuncDef, Error> {
