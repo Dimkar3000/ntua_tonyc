@@ -55,27 +55,27 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
-    fn typed_size_of(&self, ctype: &BasicTypeEnum<'ctx>) -> Option<IntValue<'ctx>> {
-        match &ctype {
-            BasicTypeEnum::ArrayType(v) => v.size_of(),
-            BasicTypeEnum::IntType(v) => v.size_of(),
-            BasicTypeEnum::FloatType(v) => v.size_of(),
-            BasicTypeEnum::PointerType(v) => match &v.get_element_type() {
-                AnyTypeEnum::ArrayType(v) => v.size_of(),
-                AnyTypeEnum::IntType(v) => v.size_of(),
-                AnyTypeEnum::FloatType(v) => v.size_of(),
-                AnyTypeEnum::PointerType(v) => v.size_of(),
-                AnyTypeEnum::StructType(v) => v.size_of(),
-                AnyTypeEnum::VectorType(v) => v.size_of(),
-                AnyTypeEnum::VoidType(e) => unreachable!("a pointer to what? : {:?}", e),
-                AnyTypeEnum::FunctionType(e) => {
-                    unreachable!("function pointer not used in this language: {:?}", e)
-                }
-            },
-            BasicTypeEnum::StructType(v) => v.size_of(),
-            BasicTypeEnum::VectorType(v) => v.size_of(),
-        }
-    }
+    // pub(crate) fn typed_size_of(&self, ctype: &BasicTypeEnum<'ctx>) -> Option<IntValue<'ctx>> {
+    //     match &ctype {
+    //         BasicTypeEnum::ArrayType(v) => v.size_of(),
+    //         BasicTypeEnum::IntType(v) => v.size_of(),
+    //         BasicTypeEnum::FloatType(v) => v.size_of(),
+    //         BasicTypeEnum::PointerType(v) => match &v.get_element_type() {
+    //             AnyTypeEnum::ArrayType(v) => v.size_of(),
+    //             AnyTypeEnum::IntType(v) => v.size_of(),
+    //             AnyTypeEnum::FloatType(v) => v.size_of(),
+    //             AnyTypeEnum::PointerType(v) => v.size_of(),
+    //             AnyTypeEnum::StructType(v) => v.size_of(),
+    //             AnyTypeEnum::VectorType(v) => v.size_of(),
+    //             AnyTypeEnum::VoidType(e) => unreachable!("a pointer to what? : {:?}", e),
+    //             AnyTypeEnum::FunctionType(e) => {
+    //                 unreachable!("function pointer not used in this language: {:?}", e)
+    //             }
+    //         },
+    //         BasicTypeEnum::StructType(v) => v.size_of(),
+    //         BasicTypeEnum::VectorType(v) => v.size_of(),
+    //     }
+    // }
 
     fn context_to_type(&self, list: &[VarDef]) -> BasicTypeEnum<'ctx> {
         let fields: Vec<_> = list
@@ -198,12 +198,6 @@ impl<'ctx> CodeGen<'ctx> {
     pub fn new(context: &'ctx Context, module: Module<'ctx>) -> Result<Self, Error> {
         let mut std = SymbolTable::new();
         std.open_scope("root");
-        let gc_malloct = context
-            .i8_type()
-            .ptr_type(AddressSpace::Generic)
-            .fn_type(&[context.i64_type().into()], false);
-        let gc_malloc = module.add_function("GC_malloc", gc_malloct, Some(Linkage::External));
-        std.insert("GC_malloc".to_owned(), gc_malloc)?;
         let strlent = context.i16_type().fn_type(
             &[context.i8_type().ptr_type(AddressSpace::Generic).into()],
             false,
@@ -954,23 +948,11 @@ impl<'ctx> CodeGen<'ctx> {
         ctype: &BasicTypeEnum<'ctx>,
         is_ref: bool,
     ) -> BasicValueEnum<'ctx> {
-        let gc_malloc = self.module.get_function("GC_malloc").unwrap();
-        let size = ctype
+        let ctype = ctype
             .into_pointer_type()
             .get_element_type()
-            .into_struct_type()
-            .size_of()
-            .unwrap()
-            .into();
-        let data = self.builder.build_call(gc_malloc, &[size], "gc_malloc_d");
-        let new_tail = self
-            .builder
-            .build_bitcast(
-                data.try_as_basic_value().left().unwrap(),
-                ctype.into_pointer_type(),
-                "cast_gc",
-            )
-            .into_pointer_value();
+            .into_struct_type();
+        let new_tail = self.builder.build_malloc(ctype, "nill").unwrap();
 
         let flag = self.builder.build_struct_gep(new_tail, 2, "flag").unwrap();
         self.builder
@@ -1126,22 +1108,19 @@ impl<'ctx> CodeGen<'ctx> {
                     .build_load(ptr, &format!("{}_ptr_{}", t, at.get_name()))
             }
             Expr::NewArray(t, exp) => {
-                let t = self.typedecl_to_type(&*t);
+                let t = match t {
+                    TypeDecl::Array(t) => self.typedecl_to_type(t),
+                    e => unreachable!(
+                        "new array should have an array type, but instead got: {}",
+                        e
+                    ),
+                };
                 let size = self.compile_exp(exp, false, var_list);
                 assert!(size.is_int_value());
-                let size = self.builder.build_int_cast(
-                    size.into_int_value(),
-                    self.context.i64_type(),
-                    "upcast",
-                );
-                let t_size = self.typed_size_of(&t).unwrap();
-                let total_size = self.builder.build_int_add(size, t_size, "array_size");
-                let gc_malloc = self.module.get_function("GC_malloc").unwrap();
-                let data =
-                    self.builder
-                        .build_call(gc_malloc, &[total_size.into()], "gc_malloc_new");
                 self.builder
-                    .build_bitcast(data.try_as_basic_value().left().unwrap(), t, "cast_gc")
+                    .build_array_malloc(t, size.into_int_value(), "new_array")
+                    .unwrap()
+                    .into()
             }
             Expr::Binary(t, x, y) => {
                 let x = self

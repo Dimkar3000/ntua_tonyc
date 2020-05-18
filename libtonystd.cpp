@@ -18,7 +18,7 @@ extern "C" void putb(bool a)
 {
     std::cout << (a ? "true" : "false");
 }
-//struct t{};
+
 extern "C" void puti8(char c)
 {
     std::cout << c;
@@ -31,9 +31,6 @@ extern "C" void putstring(char *s)
 extern "C" void gets(int16_t n, char *s)
 {
     std::cin.clear();
-    //    if(std::cin.peek() == -1) {
-    //        std::cin.clear();
-    //    }
     if (s == 0)
     {
         return;
@@ -42,9 +39,7 @@ extern "C" void gets(int16_t n, char *s)
     if (std::cin.peek() == '\n')
     {
         std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-        //    std::cout << "left: " << std::cin.peek() << std::endl;
     }
-    //    s[n] = '\0';
 }
 
 extern "C" int16_t geti()
@@ -67,10 +62,7 @@ extern "C" bool getb()
     std::cin.clear();
     std::string data;
     std::getline(std::cin, data);
-    //    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-    std::transform(data.begin(), data.end(), data.begin(),
-                   [](unsigned char c) { return std::tolower(c); });
-    if (data == "true")
+    if (data[0] == 't' || data[0] == 'T')
     {
         return true;
     }

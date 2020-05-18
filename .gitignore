@@ -15,3 +15,4 @@ gcmt*
 Cargo.lock
 libgc*
 libtonystd.obj
+std.lib
