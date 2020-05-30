@@ -1,15 +1,11 @@
-#ifdef _WIN32
-#pragma comment(lib, "user32")
-#endif
 #include <iostream>
 #include <string>
 #include <algorithm>
 #include <limits>
 #include <ios>
 
-#include <memory>
-
-extern "C" void puti(int16_t a)
+extern "C" void
+puti(int16_t a)
 {
     std::cout << a;
 }

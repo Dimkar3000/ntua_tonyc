@@ -135,26 +135,20 @@ impl<'ctx> CodeGen<'ctx> {
         } else if self.function_table.lookup(name).is_some() {
             let lname = format!("{}_{}", name, random_sub_str());
             let f = self.module.add_function(&lname, ftype, None);
-            for i in 0..ref_list.len() {
+            for (i, &refi) in ref_list.iter().enumerate() {
                 f.add_attribute(
                     AttributeLoc::Param(i as u32),
-                    context.create_string_attribute(
-                        "is_ref",
-                        if ref_list[i] { "true" } else { "false" },
-                    ),
+                    context.create_string_attribute("is_ref", if refi { "true" } else { "false" }),
                 )
             }
             self.function_table.insert(name, f)?;
             Ok(f)
         } else {
             let f = self.module.add_function(name, ftype, None);
-            for i in 0..ref_list.len() {
+            for (i, &refi) in ref_list.iter().enumerate() {
                 f.add_attribute(
                     AttributeLoc::Param(i as u32),
-                    context.create_string_attribute(
-                        "is_ref",
-                        if ref_list[i] { "true" } else { "false" },
-                    ),
+                    context.create_string_attribute("is_ref", if refi { "true" } else { "false" }),
                 )
             }
             self.function_table.insert(name, f)?;
@@ -338,7 +332,6 @@ impl<'ctx> CodeGen<'ctx> {
             pass_manager.add_constant_merge_pass();
             pass_manager.add_dead_arg_elimination_pass();
             pass_manager.add_function_attrs_pass();
-            pass_manager.add_function_inlining_pass();
             pass_manager.add_always_inliner_pass();
             pass_manager.add_global_dce_pass();
             pass_manager.add_global_optimizer_pass();
@@ -387,13 +380,7 @@ impl<'ctx> CodeGen<'ctx> {
             pass_manager.add_type_based_alias_analysis_pass();
             pass_manager.add_scoped_no_alias_aa_pass();
             pass_manager.add_basic_alias_analysis_pass();
-            let time = Instant::now();
-            // Spend half a sec to optimize code
-            while pass_manager.run_on(&self.module) {
-                if time.elapsed().as_secs_f32() > 0.5 {
-                    break;
-                }
-            }
+            pass_manager.run_on(&self.module);
         }
 
         Target::initialize_x86(&InitializationConfig::default());
@@ -583,7 +570,213 @@ impl<'ctx> CodeGen<'ctx> {
         Ok(())
     }
 
-    #[allow(clippy::cognitive_complexity)]
+    fn compile_if_stmt(
+        &mut self,
+        stmt: &Stmt,
+        func: &FuncDef,
+        block: BasicBlock<'ctx>,
+        exit_block: BasicBlock<'ctx>,
+        var_list: &HashMap<String, PointerValue<'ctx>>,
+    ) {
+        if let Stmt::If {
+            condition: cond,
+            stmts: main_stmt,
+            elseif: elseifs,
+            elseblock: else_stmts,
+        } = stmt
+        {
+            let condition = self.compile_exp(cond, false, var_list);
+            assert!(condition.is_int_value());
+            let mut then_block = self.context.insert_basic_block_after(
+                block,
+                &format!("{}_if", block.get_name().to_str().unwrap()),
+            );
+            let mut else_block = self.context.insert_basic_block_after(
+                then_block,
+                &format!("{}_else", block.get_name().to_str().unwrap()),
+            );
+            let if_exit_block = self.context.insert_basic_block_after(
+                then_block,
+                &format!("{}_ifexit", block.get_name().to_str().unwrap()),
+            );
+            self.builder.build_conditional_branch(
+                condition.into_int_value(),
+                then_block,
+                else_block,
+            );
+            // then block
+            self.builder.position_at_end(then_block);
+            let mut contains_return = false;
+            let mut exited = false;
+            for i in main_stmt {
+                if self.compile_stmt(i, func, then_block, exit_block, &mut exited, var_list) {
+                    assert!(!contains_return);
+                    contains_return = true;
+                }
+            }
+            if !contains_return && !exited {
+                self.builder.build_unconditional_branch(if_exit_block);
+            }
+            self.builder.position_at_end(else_block);
+            for (i, elseif) in elseifs.iter().enumerate() {
+                then_block = self
+                    .context
+                    .insert_basic_block_after(else_block, &format!("else_ifthen{}", i));
+                else_block = self
+                    .context
+                    .insert_basic_block_after(else_block, &format!("else_ifelse{}", i));
+                let condition = self.compile_exp(&elseif.0, false, var_list);
+                assert!(condition.is_int_value());
+                self.builder.build_conditional_branch(
+                    condition.into_int_value(),
+                    then_block,
+                    else_block,
+                );
+                // elsifs
+                self.builder.position_at_end(then_block);
+                let mut contains_return = false;
+                let mut exited = false;
+                for i in &elseif.1 {
+                    if self.compile_stmt(&i, func, then_block, exit_block, &mut exited, var_list) {
+                        assert!(!contains_return);
+                        contains_return = true;
+                    }
+                }
+                if !contains_return && !exited {
+                    self.builder.build_unconditional_branch(if_exit_block);
+                }
+                self.builder.position_at_end(else_block);
+            }
+            // else block
+            let mut contains_return = false;
+            let mut exited = false;
+            for i in else_stmts {
+                if self.compile_stmt(i, func, else_block, exit_block, &mut exited, var_list) {
+                    assert!(!contains_return);
+                    contains_return = true;
+                }
+            }
+            if !contains_return && !exited {
+                self.builder.build_unconditional_branch(if_exit_block);
+            }
+            self.builder.position_at_end(if_exit_block);
+        }
+    }
+
+    fn compile_call_stmt(
+        &mut self,
+        stmt: &Stmt,
+        func: &FuncDef,
+        var_list: &HashMap<String, PointerValue<'ctx>>,
+    ) {
+        if let Stmt::Call(name, args) = stmt {
+            let function = *self.function_table.lookup(name).unwrap();
+            let mut v = Vec::new();
+            for (i, arg) in args.iter().enumerate() {
+                let mut is_ref = false;
+                for j in &func.defs {
+                    if &j.header.name == name && j.header.arguments[i].is_ref {
+                        is_ref = true;
+                        break;
+                    }
+                }
+                if !is_ref {
+                    for j in &func.decls {
+                        if &j.name == name && j.arguments[i].is_ref {
+                            is_ref = true;
+                            break;
+                        }
+                    }
+                }
+                let r = self.compile_exp(&arg, is_ref, var_list);
+                v.push(r);
+            }
+            let mut my_ctx = func.defs.iter().find_map(|x| {
+                if &x.header.name == name {
+                    Some(x.header.ctx.clone())
+                } else {
+                    None
+                }
+            });
+            if my_ctx.is_none() {
+                my_ctx = func.decls.iter().find_map(|x| {
+                    if &x.name == name {
+                        Some(x.ctx.clone())
+                    } else {
+                        None
+                    }
+                });
+            }
+            if let Some(my_ctx) = my_ctx {
+                if !my_ctx.is_empty() {
+                    // we have context
+                    let ctype = self.context_to_type(&my_ctx);
+                    let p = self.builder.build_alloca(ctype, "ctx");
+                    for (i, item) in my_ctx.iter().enumerate() {
+                        let d = var_list.get(&item.name).unwrap();
+                        let t = self.builder.build_struct_gep(
+                            p,
+                            i as u32,
+                            &format!("tmp_{}_ptr", &item.name),
+                        );
+                        self.builder.build_store(t.unwrap(), *d);
+                    }
+                    v.insert(0, p.into());
+                }
+            }
+            self.builder
+                .build_call(function, &v, &format!("call_{}", name));
+        }
+    }
+
+    fn compile_for_stmt(
+        &mut self,
+        stmt: &Stmt,
+        func: &FuncDef,
+        block: BasicBlock<'ctx>,
+        exit_block: BasicBlock<'ctx>,
+        var_list: &HashMap<String, PointerValue<'ctx>>,
+    ) {
+        if let Stmt::For(pre_stmts, cond, post_stmts, main_stmts) = stmt {
+            let mut exited = false;
+            for i in pre_stmts {
+                self.compile_stmt(&i, func, block, exit_block, &mut exited, var_list);
+            }
+            let for_header = self.context.insert_basic_block_after(block, "for_header");
+            let for_body = self
+                .context
+                .insert_basic_block_after(for_header, "for_body");
+            let for_exit = self.context.insert_basic_block_after(for_body, "for_exit");
+            self.builder.build_unconditional_branch(for_header);
+            self.builder.position_at_end(for_header);
+            let condition = self.compile_exp(cond, false, var_list);
+            assert!(condition.is_int_value());
+            self.builder
+                .build_conditional_branch(condition.into_int_value(), for_body, for_exit);
+
+            // Body
+            let mut exited = false;
+            let mut returned = false;
+            self.builder.position_at_end(for_body);
+            for i in main_stmts {
+                if self.compile_stmt(i, func, for_body, for_exit, &mut exited, var_list) {
+                    assert!(!returned);
+                    returned = true;
+                }
+            }
+            for i in post_stmts {
+                if self.compile_stmt(i, func, for_body, for_exit, &mut exited, var_list) {
+                    assert!(!returned);
+                    returned = true;
+                }
+            }
+            if !returned && !exited {
+                self.builder.build_unconditional_branch(for_header);
+            }
+            self.builder.position_at_end(for_exit);
+        }
+    }
+
     fn compile_stmt(
         &mut self,
         stmt: &Stmt,
@@ -614,195 +807,15 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                 };
             }
-            Stmt::If {
-                condition: cond,
-                stmts: main_stmt,
-                elseif: elseifs,
-                elseblock: else_stmts,
-            } => {
-                let condition = self.compile_exp(cond, false, var_list);
-                assert!(condition.is_int_value());
-                let mut then_block = self.context.insert_basic_block_after(
-                    block,
-                    &format!("{}_if", block.get_name().to_str().unwrap()),
-                );
-                let mut else_block = self.context.insert_basic_block_after(
-                    then_block,
-                    &format!("{}_else", block.get_name().to_str().unwrap()),
-                );
-                let if_exit_block = self.context.insert_basic_block_after(
-                    then_block,
-                    &format!("{}_ifexit", block.get_name().to_str().unwrap()),
-                );
-                self.builder.build_conditional_branch(
-                    condition.into_int_value(),
-                    then_block,
-                    else_block,
-                );
-                // then block
-                self.builder.position_at_end(then_block);
-                let mut contains_return = false;
-                let mut exited = false;
-                for i in main_stmt {
-                    if self.compile_stmt(i, func, then_block, exit_block, &mut exited, var_list) {
-                        assert!(!contains_return);
-                        contains_return = true;
-                    }
-                }
-                if !contains_return && !exited {
-                    self.builder.build_unconditional_branch(if_exit_block);
-                }
-                self.builder.position_at_end(else_block);
-                for (i, elseif) in elseifs.iter().enumerate() {
-                    then_block = self
-                        .context
-                        .insert_basic_block_after(else_block, &format!("else_ifthen{}", i));
-                    else_block = self
-                        .context
-                        .insert_basic_block_after(else_block, &format!("else_ifelse{}", i));
-                    let condition = self.compile_exp(&elseif.0, false, var_list);
-                    assert!(condition.is_int_value());
-                    self.builder.build_conditional_branch(
-                        condition.into_int_value(),
-                        then_block,
-                        else_block,
-                    );
-                    // elsifs
-                    self.builder.position_at_end(then_block);
-                    let mut contains_return = false;
-                    let mut exited = false;
-                    for i in &elseif.1 {
-                        if self.compile_stmt(
-                            &i,
-                            func,
-                            then_block,
-                            exit_block,
-                            &mut exited,
-                            var_list,
-                        ) {
-                            assert!(!contains_return);
-                            contains_return = true;
-                        }
-                    }
-                    if !contains_return && !exited {
-                        self.builder.build_unconditional_branch(if_exit_block);
-                    }
-                    self.builder.position_at_end(else_block);
-                }
-                // else block
-                let mut contains_return = false;
-                let mut exited = false;
-                for i in else_stmts {
-                    if self.compile_stmt(i, func, else_block, exit_block, &mut exited, var_list) {
-                        assert!(!contains_return);
-                        contains_return = true;
-                    }
-                }
-                if !contains_return && !exited {
-                    self.builder.build_unconditional_branch(if_exit_block);
-                }
-                self.builder.position_at_end(if_exit_block);
+            Stmt::If { .. } => {
+                self.compile_if_stmt(stmt, func, block, exit_block, var_list);
             }
-            Stmt::For(pre_stmts, cond, post_stmts, main_stmts) => {
-                let mut exited = false;
-                for i in pre_stmts {
-                    self.compile_stmt(&i, func, block, exit_block, &mut exited, var_list);
-                }
-                let for_header = self.context.insert_basic_block_after(block, "for_header");
-                let for_body = self
-                    .context
-                    .insert_basic_block_after(for_header, "for_body");
-                let for_exit = self.context.insert_basic_block_after(for_body, "for_exit");
-                self.builder.build_unconditional_branch(for_header);
-                self.builder.position_at_end(for_header);
-                let condition = self.compile_exp(cond, false, var_list);
-                assert!(condition.is_int_value());
-                self.builder.build_conditional_branch(
-                    condition.into_int_value(),
-                    for_body,
-                    for_exit,
-                );
-
-                // Body
-                let mut exited = false;
-                let mut returned = false;
-                self.builder.position_at_end(for_body);
-                for i in main_stmts {
-                    if self.compile_stmt(i, func, for_body, for_exit, &mut exited, var_list) {
-                        assert!(!returned);
-                        returned = true;
-                    }
-                }
-                for i in post_stmts {
-                    if self.compile_stmt(i, func, for_body, for_exit, &mut exited, var_list) {
-                        assert!(!returned);
-                        returned = true;
-                    }
-                }
-                if !returned && !exited {
-                    self.builder.build_unconditional_branch(for_header);
-                }
-                self.builder.position_at_end(for_exit);
+            Stmt::For(..) => {
+                self.compile_for_stmt(stmt, func, block, exit_block, var_list);
             }
             Stmt::Skip => (/* Skip does nothing so no code is generated*/),
-            Stmt::Call(name, args) => {
-                let function = *self.function_table.lookup(name).unwrap();
-                let mut v = Vec::new();
-                for (i, arg) in args.iter().enumerate() {
-                    let mut is_ref = false;
-                    for j in &func.defs {
-                        if &j.header.name == name && j.header.arguments[i].is_ref {
-                            is_ref = true;
-                            break;
-                        }
-                    }
-                    if !is_ref {
-                        for j in &func.decls {
-                            if &j.name == name && j.arguments[i].is_ref {
-                                is_ref = true;
-                                break;
-                            }
-                        }
-                    }
-                    let r = self.compile_exp(&arg, is_ref, var_list);
-                    v.push(r);
-                }
-                let mut my_ctx = func.defs.iter().find_map(|x| {
-                    if &x.header.name == name {
-                        Some(x.header.ctx.clone())
-                    } else {
-                        None
-                    }
-                });
-                if my_ctx.is_none() {
-                    my_ctx = func.decls.iter().find_map(|x| {
-                        if &x.name == name {
-                            Some(x.ctx.clone())
-                        } else {
-                            None
-                        }
-                    });
-                }
-                if my_ctx.is_some() {
-                    let my_ctx = my_ctx.unwrap();
-                    if !my_ctx.is_empty() {
-                        // we have context
-                        let ctype = self.context_to_type(&my_ctx);
-                        let p = self.builder.build_alloca(ctype, "ctx");
-                        for i in 0..my_ctx.len() {
-                            let d = var_list.get(&my_ctx[i].name).unwrap();
-                            let t = self.builder.build_struct_gep(
-                                p,
-                                i as u32,
-                                &format!("tmp_{}_ptr", my_ctx[i].name),
-                            );
-                            self.builder.build_store(t.unwrap(), *d);
-                        }
-                        v.insert(0, p.into());
-                    }
-                }
-                self.builder
-                    .build_call(function, &v, &format!("call_{}", name));
+            Stmt::Call(..) => {
+                self.compile_call_stmt(stmt, func, var_list);
             }
             Stmt::Assign(atom, exp) => {
                 let ptr = self.get_atom(atom, &var_list);
@@ -909,18 +922,17 @@ impl<'ctx> CodeGen<'ctx> {
                     }
                 }
                 let my_ctx = self.ctx_mapping.get(name);
-                if my_ctx.is_some() {
-                    let my_ctx = my_ctx.unwrap();
+                if let Some(my_ctx) = my_ctx {
                     if !my_ctx.is_empty() {
                         // we have context
                         let ctype = self.context_to_type(my_ctx);
                         let p = self.builder.build_alloca(ctype, "ctx");
-                        for i in 0..my_ctx.len() {
+                        for (i, item) in my_ctx.iter().enumerate() {
                             let d = var_list.get(&my_ctx[i].name).unwrap();
                             let t = self.builder.build_struct_gep(
                                 p,
                                 i as u32,
-                                &format!("tmp_{}_ptr", my_ctx[i].name),
+                                &format!("tmp_{}_ptr", item.name),
                             );
                             self.builder.build_store(t.unwrap(), *d);
                         }
@@ -958,10 +970,7 @@ impl<'ctx> CodeGen<'ctx> {
         self.builder
             .build_store(flag, self.context.bool_type().const_int(1, false));
         if is_ref {
-            let p = self
-                .builder
-                .build_alloca(new_tail.get_type(), "ref_nil")
-                .into();
+            let p = self.builder.build_alloca(new_tail.get_type(), "ref_nil");
             self.builder.build_store(p, new_tail);
             p.into()
         } else {
@@ -1070,7 +1079,7 @@ impl<'ctx> CodeGen<'ctx> {
                     self.builder.build_store(n, ptr);
                     n.into()
                 } else {
-                    ptr.into()
+                    ptr
                 }
             }
             Expr::Head(_t, exp) => {

@@ -45,7 +45,7 @@ impl AstRoot {
     }
 
     pub fn generate(&mut self) -> Result<FuncDef, Error> {
-        if self.tokens.len() == 0 {
+        if self.tokens.is_empty() {
             return Err(Error::with_message(0, 0, "No tokens supplied", "Ast"));
         }
         FuncDef::generate(&self.tokens, &mut 0, &mut self.symbol_table)

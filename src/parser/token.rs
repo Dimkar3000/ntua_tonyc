@@ -58,7 +58,7 @@ impl Token {
     }
     pub fn get_error(&self) -> Result<String, ()> {
         if let TokenExtra::Error(s) = self.extra.clone() {
-            Ok(s.clone())
+            Ok(s)
         } else {
             Err(())
         }

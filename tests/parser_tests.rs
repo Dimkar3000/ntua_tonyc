@@ -5,7 +5,7 @@
 //     let mut parser = Parser::new(
 //         r#""abc" "Route66" "Helloworld!\n"
 //         "Name:\t\"DouglasAdams\"\nValue:\t42\n"
-//         "\n\t\r\0\\\'\"\x01"     
+//         "\n\t\r\0\\\'\"\x01"
 //         "#,
 //     );
 //     let tokens = parser.produce();
@@ -29,8 +29,8 @@
 //         r#"and bool char decl def else elsif
 //     end exit false for head if int
 //     list mod new nil nil? not or
-//     ref return skip tail true 
-//     0 42 1284 00200 
+//     ref return skip tail true
+//     0 42 1284 00200
 //     'a' '1' '\n' '\\' '\x1d'
 //     "#,
 //     );

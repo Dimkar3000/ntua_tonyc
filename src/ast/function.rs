@@ -287,7 +287,7 @@ impl FuncDef {
                                 "Ast",
                             ))
                         }
-                        
+
                         _ => (),
                     }
                     stmts.push(stmt);
@@ -295,27 +295,29 @@ impl FuncDef {
                 }
                 // remove from ctx all variables from the same scope
 
-                for i in 0..args.len() {
-                    let pos = ctx.iter().position(|x| x.name == args[i].def.name);
-                    if pos.is_some() {
-                        ctx.remove(pos.unwrap());
+                for arg in &args {
+                    let pos = ctx.iter().position(|x| x.name == arg.def.name);
+                    if let Some(pos) = pos {
+                        ctx.remove(pos);
                     }
                 }
-                for i in 0..vars.len() {
-                    let pos = ctx.iter().position(|x| x.name == vars[i].name);
-                    if pos.is_some() {
-                        ctx.remove(pos.unwrap());
+                for var in &vars {
+                    let pos = ctx.iter().position(|x| x.name == var.name);
+                    if let Some(pos) = pos {
+                        ctx.remove(pos);
                     }
-                } 
+                }
 
                 for i in &defs {
                     for j in &i.header.ctx {
-                        if ctx.iter().all(|x| x.name != j.name) && vars.iter().all(|x| x.name != j.name){
+                        if ctx.iter().all(|x| x.name != j.name)
+                            && vars.iter().all(|x| x.name != j.name)
+                        {
                             ctx.push(j.clone());
                         }
                     }
                 }
-                
+
                 // println!("ctx of {}: {:?}", name, ctx);
                 *index += 1;
                 symbol_table.close_scope();
