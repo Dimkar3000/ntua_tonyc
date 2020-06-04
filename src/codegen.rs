@@ -55,27 +55,43 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
-    // pub(crate) fn typed_size_of(&self, ctype: &BasicTypeEnum<'ctx>) -> Option<IntValue<'ctx>> {
-    //     match &ctype {
-    //         BasicTypeEnum::ArrayType(v) => v.size_of(),
-    //         BasicTypeEnum::IntType(v) => v.size_of(),
-    //         BasicTypeEnum::FloatType(v) => v.size_of(),
-    //         BasicTypeEnum::PointerType(v) => match &v.get_element_type() {
-    //             AnyTypeEnum::ArrayType(v) => v.size_of(),
-    //             AnyTypeEnum::IntType(v) => v.size_of(),
-    //             AnyTypeEnum::FloatType(v) => v.size_of(),
-    //             AnyTypeEnum::PointerType(v) => v.size_of(),
-    //             AnyTypeEnum::StructType(v) => v.size_of(),
-    //             AnyTypeEnum::VectorType(v) => v.size_of(),
-    //             AnyTypeEnum::VoidType(e) => unreachable!("a pointer to what? : {:?}", e),
-    //             AnyTypeEnum::FunctionType(e) => {
-    //                 unreachable!("function pointer not used in this language: {:?}", e)
-    //             }
-    //         },
-    //         BasicTypeEnum::StructType(v) => v.size_of(),
-    //         BasicTypeEnum::VectorType(v) => v.size_of(),
-    //     }
-    // }
+    // Allocates and returns a Pointer to ctype on the heap
+    fn malloc(&self, ctype: &BasicTypeEnum<'ctx>) -> PointerValue<'ctx> {
+        let size = self.typed_size_of(&ctype).unwrap();
+        let gc_malloc = self.function_table.lookup("GC_malloc");
+        let d = self
+            .builder
+            .build_call(*gc_malloc.unwrap(), &[size.into()], "gcmalloctmp");
+        self.builder
+            .build_bitcast(
+                d.as_any_value_enum().into_pointer_value(),
+                ctype.ptr_type(AddressSpace::Generic),
+                "cast",
+            )
+            .into_pointer_value()
+    }
+
+    fn typed_size_of(&self, ctype: &BasicTypeEnum<'ctx>) -> Option<IntValue<'ctx>> {
+        match &ctype {
+            BasicTypeEnum::ArrayType(v) => v.size_of(),
+            BasicTypeEnum::IntType(v) => v.size_of(),
+            BasicTypeEnum::FloatType(v) => v.size_of(),
+            BasicTypeEnum::PointerType(v) => match &v.get_element_type() {
+                AnyTypeEnum::ArrayType(v) => v.size_of(),
+                AnyTypeEnum::IntType(v) => v.size_of(),
+                AnyTypeEnum::FloatType(v) => v.size_of(),
+                AnyTypeEnum::PointerType(v) => v.size_of(),
+                AnyTypeEnum::StructType(v) => v.size_of(),
+                AnyTypeEnum::VectorType(v) => v.size_of(),
+                AnyTypeEnum::VoidType(e) => unreachable!("a pointer to what? : {:?}", e),
+                AnyTypeEnum::FunctionType(e) => {
+                    unreachable!("function pointer not used in this language: {:?}", e)
+                }
+            },
+            BasicTypeEnum::StructType(v) => v.size_of(),
+            BasicTypeEnum::VectorType(v) => v.size_of(),
+        }
+    }
 
     fn context_to_type(&self, list: &[VarDef]) -> BasicTypeEnum<'ctx> {
         let fields: Vec<_> = list
@@ -86,7 +102,7 @@ impl<'ctx> CodeGen<'ctx> {
                     .as_basic_type_enum()
             })
             .collect();
-        self.context.struct_type(&fields, true).into()
+        self.context.struct_type(&fields, false).into()
     }
 
     fn typedecl_to_type(&self, t: &TypeDecl) -> BasicTypeEnum<'ctx> {
@@ -112,7 +128,7 @@ impl<'ctx> CodeGen<'ctx> {
                                 node.ptr_type(AddressSpace::Generic).into(),
                                 self.context.bool_type().into(),
                             ],
-                            true,
+                            false,
                         );
                         assert!(is_opaque);
                         node.ptr_type(AddressSpace::Generic).into()
@@ -192,6 +208,14 @@ impl<'ctx> CodeGen<'ctx> {
     pub fn new(context: &'ctx Context, module: Module<'ctx>) -> Result<Self, Error> {
         let mut std = SymbolTable::new();
         std.open_scope("root");
+
+        let gc_malloct = context
+            .i8_type()
+            .ptr_type(AddressSpace::Generic)
+            .fn_type(&[context.i64_type().into()], false);
+        let gc_malloc = module.add_function("GC_malloc", gc_malloct, Some(Linkage::ExternalWeak));
+        std.insert("GC_malloc".to_owned(), gc_malloc)?;
+
         let strlent = context.i16_type().fn_type(
             &[context.i8_type().ptr_type(AddressSpace::Generic).into()],
             false,
@@ -295,9 +319,15 @@ impl<'ctx> CodeGen<'ctx> {
             .module
             .add_function("main", self.context.i32_type().fn_type(&[], false), None);
         let entry_block = self.context.append_basic_block(f, "main_entry");
+        self.builder.position_at_end(entry_block);
+        // // Init GC
+        let gc_initt = self.context.void_type().fn_type(&[], false);
+        let gc_init = self
+            .module
+            .add_function("GC_init", gc_initt, Some(Linkage::External));
+        self.builder.build_call(gc_init, &[], "init_gc");
 
-        //
-        // self.function_table.insert("main", f).unwrap();
+        // Shadow rename the function if it's name is main because it collides with the main function llvm expects
         if main.header.name == "main" {
             main.header.name = "main_".to_owned();
         };
@@ -305,29 +335,19 @@ impl<'ctx> CodeGen<'ctx> {
         self.compile_func(self.context, &main)?;
 
         self.builder.position_at_end(entry_block);
-        // // Init GC
-        // let gc_init = self.function_table.lookup("GC_INIT");
-        // self.builder.build_call(*gc_init.unwrap(), &[], "init_gc");
         // Fill wrapper
         let callee = self.module.get_function(&main.header.name).unwrap();
         self.builder.build_call(callee, &[], "call_entry");
         self.builder
             .build_return(Some(&self.context.i32_type().const_int(0, false)));
         // Clean global function table
-        if let Err(e) = self.module.verify() {
-            use colored::*;
-            let m: String = e.to_str().unwrap().replace("\n", "\n\t\t ");
-            eprintln!("{}: {}", "verifier warning".to_owned().yellow(), m)
-        }
-        println!("Code generation: {:.5} secs", now.elapsed().as_secs_f64());
-        let now = Instant::now();
+
         // Create FPM
         // Build Object file
         let interm_path = filename.with_extension("imm");
         let final_path = filename.with_extension("asm");
+        let pass_manager = PassManager::create(());
         if optimize {
-            let pass_manager = PassManager::create(());
-
             pass_manager.add_argument_promotion_pass();
             pass_manager.add_constant_merge_pass();
             pass_manager.add_dead_arg_elimination_pass();
@@ -380,8 +400,25 @@ impl<'ctx> CodeGen<'ctx> {
             pass_manager.add_type_based_alias_analysis_pass();
             pass_manager.add_scoped_no_alias_aa_pass();
             pass_manager.add_basic_alias_analysis_pass();
-            pass_manager.run_on(&self.module);
+        } else {
+            // Info: this remove dead blocks.
+            // because we don't make deep code analyses in the front of the compiler there are cases where dead blocks can have wrong code inside.
+            // LLVM will automatically remove them but the verifier is called before the file writer and creates warnings. So I make a pass to eliminate dead code so I remove these warnings
+            // As far I know this "mistakes" wheren't part of the original file genrated.
+            //
+            // Look in the err.ll file generated only when the verifier generates a warning to find such mistakes
+            pass_manager.add_cfg_simplification_pass();
         }
+        pass_manager.run_on(&self.module);
+
+        if let Err(e) = self.module.verify() {
+            use colored::*;
+            let m = e.to_str().unwrap();
+            eprintln!("{}: {}", "verifier warning".to_owned().yellow(), m);
+            self.module.print_to_file("err.ll").unwrap();
+        }
+        println!("Code generation: {:.5} secs", now.elapsed().as_secs_f64());
+        let now = Instant::now();
 
         Target::initialize_x86(&InitializationConfig::default());
         let opt = if optimize {
@@ -532,6 +569,7 @@ impl<'ctx> CodeGen<'ctx> {
         }
         // Variables
         for i in &func.vars {
+            println!("type: {}", i.var_type);
             let t = self.typedecl_to_type(&i.var_type);
             let p = match &i.var_type {
                 TypeDecl::List(_) => self.create_typed_nil(&t, true).into_pointer_value(),
@@ -539,6 +577,8 @@ impl<'ctx> CodeGen<'ctx> {
                     .builder
                     .build_alloca(t, &format!("{}_{}", func.header.name, i.name)),
             };
+            println!("t: {:?}", t);
+            println!("p: {:?}", p);
             var_list.insert(i.name.clone(), p);
         }
         self.ctx_mapping
@@ -577,7 +617,8 @@ impl<'ctx> CodeGen<'ctx> {
         block: BasicBlock<'ctx>,
         exit_block: BasicBlock<'ctx>,
         var_list: &HashMap<String, PointerValue<'ctx>>,
-    ) {
+    ) -> bool {
+        let mut result = false;
         if let Stmt::If {
             condition: cond,
             stmts: main_stmt,
@@ -585,6 +626,21 @@ impl<'ctx> CodeGen<'ctx> {
             elseblock: else_stmts,
         } = stmt
         {
+            let test = |x: &[Stmt]| {
+                x.iter().any(|x| {
+                    if let &Stmt::Return(..) = x {
+                        true
+                    } else if let &Stmt::Exit = x {
+                        true
+                    } else {
+                        false
+                    }
+                }) || x.is_empty()
+            };
+            if test(main_stmt) && test(else_stmts) && elseifs.iter().all(|x| test(&x.1)) {
+                result = true
+            }
+
             let condition = self.compile_exp(cond, false, var_list);
             assert!(condition.is_int_value());
             let mut then_block = self.context.insert_basic_block_after(
@@ -607,14 +663,13 @@ impl<'ctx> CodeGen<'ctx> {
             // then block
             self.builder.position_at_end(then_block);
             let mut contains_return = false;
-            let mut exited = false;
             for i in main_stmt {
-                if self.compile_stmt(i, func, then_block, exit_block, &mut exited, var_list) {
+                if self.compile_stmt(i, func, then_block, exit_block, var_list) {
                     assert!(!contains_return);
                     contains_return = true;
                 }
             }
-            if !contains_return && !exited {
+            if !contains_return {
                 self.builder.build_unconditional_branch(if_exit_block);
             }
             self.builder.position_at_end(else_block);
@@ -635,32 +690,31 @@ impl<'ctx> CodeGen<'ctx> {
                 // elsifs
                 self.builder.position_at_end(then_block);
                 let mut contains_return = false;
-                let mut exited = false;
                 for i in &elseif.1 {
-                    if self.compile_stmt(&i, func, then_block, exit_block, &mut exited, var_list) {
+                    if self.compile_stmt(&i, func, then_block, exit_block, var_list) {
                         assert!(!contains_return);
                         contains_return = true;
                     }
                 }
-                if !contains_return && !exited {
+                if !contains_return {
                     self.builder.build_unconditional_branch(if_exit_block);
                 }
                 self.builder.position_at_end(else_block);
             }
             // else block
             let mut contains_return = false;
-            let mut exited = false;
             for i in else_stmts {
-                if self.compile_stmt(i, func, else_block, exit_block, &mut exited, var_list) {
+                if self.compile_stmt(i, func, else_block, exit_block, var_list) {
                     assert!(!contains_return);
                     contains_return = true;
                 }
             }
-            if !contains_return && !exited {
+            if !contains_return {
                 self.builder.build_unconditional_branch(if_exit_block);
             }
             self.builder.position_at_end(if_exit_block);
         }
+        result
     }
 
     fn compile_call_stmt(
@@ -738,9 +792,8 @@ impl<'ctx> CodeGen<'ctx> {
         var_list: &HashMap<String, PointerValue<'ctx>>,
     ) {
         if let Stmt::For(pre_stmts, cond, post_stmts, main_stmts) = stmt {
-            let mut exited = false;
             for i in pre_stmts {
-                self.compile_stmt(&i, func, block, exit_block, &mut exited, var_list);
+                self.compile_stmt(&i, func, block, exit_block, var_list);
             }
             let for_header = self.context.insert_basic_block_after(block, "for_header");
             let for_body = self
@@ -755,22 +808,21 @@ impl<'ctx> CodeGen<'ctx> {
                 .build_conditional_branch(condition.into_int_value(), for_body, for_exit);
 
             // Body
-            let mut exited = false;
             let mut returned = false;
             self.builder.position_at_end(for_body);
             for i in main_stmts {
-                if self.compile_stmt(i, func, for_body, for_exit, &mut exited, var_list) {
+                if self.compile_stmt(i, func, for_body, for_exit, var_list) {
                     assert!(!returned);
                     returned = true;
                 }
             }
             for i in post_stmts {
-                if self.compile_stmt(i, func, for_body, for_exit, &mut exited, var_list) {
+                if self.compile_stmt(i, func, for_body, for_exit, var_list) {
                     assert!(!returned);
                     returned = true;
                 }
             }
-            if !returned && !exited {
+            if !returned {
                 self.builder.build_unconditional_branch(for_header);
             }
             self.builder.position_at_end(for_exit);
@@ -783,13 +835,12 @@ impl<'ctx> CodeGen<'ctx> {
         func: &FuncDef,
         block: BasicBlock<'ctx>,
         exit_block: BasicBlock<'ctx>,
-        exited: &mut bool,
         var_list: &HashMap<String, PointerValue<'ctx>>,
     ) -> bool {
         match stmt {
             Stmt::Exit => {
                 self.builder.build_return(None);
-                *exited = true;
+                return true;
             }
             Stmt::Return(exp) => {
                 match &**exp {
@@ -830,6 +881,9 @@ impl<'ctx> CodeGen<'ctx> {
                     let v = self.create_typed_nil(&ctype, false);
                     self.builder.build_store(ptr, v);
                 } else {
+                    // println!("\nptr: {:?}", ptr);
+                    // println!("value: {:?}", value);
+
                     self.builder.build_store(ptr, value);
                 }
             }
@@ -846,18 +900,16 @@ impl<'ctx> CodeGen<'ctx> {
         block: BasicBlock<'ctx>,
         var_list: &HashMap<String, PointerValue<'ctx>>,
     ) {
-        let mut exited = false;
         let mut returned = false;
         for i in 0..func.stmts.len() {
             let stmt = &func.stmts[i];
             // Note: not sure what happend when you put an exit inside a function bloxk
             //       probably ast souldn't allow it
-            if self.compile_stmt(stmt, func, block, block, &mut exited, var_list) {
+            if self.compile_stmt(stmt, func, block, block, var_list) {
                 assert!(!returned);
                 returned = true;
             }
         }
-        assert!(!exited);
         if !returned {
             self.builder.build_return(None);
         }
@@ -926,7 +978,8 @@ impl<'ctx> CodeGen<'ctx> {
                     if !my_ctx.is_empty() {
                         // we have context
                         let ctype = self.context_to_type(my_ctx);
-                        let p = self.builder.build_alloca(ctype, "ctx");
+                        let p = self.malloc(&ctype);
+                        // let p = self.builder.build_alloca(ctype, "ctx");
                         for (i, item) in my_ctx.iter().enumerate() {
                             let d = var_list.get(&my_ctx[i].name).unwrap();
                             let t = self.builder.build_struct_gep(
@@ -945,7 +998,7 @@ impl<'ctx> CodeGen<'ctx> {
                     .try_as_basic_value()
                     .left()
                     .unwrap();
-                let r = self.builder.build_alloca(result.get_type(), "tmp");
+                let r = self.malloc(&result.get_type());
                 self.builder.build_store(r, result);
                 r
             }
@@ -964,13 +1017,15 @@ impl<'ctx> CodeGen<'ctx> {
             .into_pointer_type()
             .get_element_type()
             .into_struct_type();
-        let new_tail = self.builder.build_malloc(ctype, "nill").unwrap();
+        let new_tail = self.malloc(&ctype.into());
+        // let new_tail = self.builder.build_malloc(ctype, "nill").unwrap();
 
         let flag = self.builder.build_struct_gep(new_tail, 2, "flag").unwrap();
         self.builder
             .build_store(flag, self.context.bool_type().const_int(1, false));
         if is_ref {
-            let p = self.builder.build_alloca(new_tail.get_type(), "ref_nil");
+            let p = self.malloc(&new_tail.get_type().into());
+            // let p = self.builder.build_alloca(new_tail.get_type(), "ref_nil");
             self.builder.build_store(p, new_tail);
             p.into()
         } else {
@@ -996,33 +1051,48 @@ impl<'ctx> CodeGen<'ctx> {
                 {
                     self.create_typed_nil(&ctype, true)
                 } else {
-                    // Copy data to new ptr
-                    let p = self
-                        .builder
-                        .build_malloc(
-                            ctype
-                                .into_pointer_type()
-                                .get_element_type()
-                                .into_struct_type(),
-                            "malloc_t",
-                        )
-                        .unwrap();
+                    let p = self.malloc(
+                        &ctype
+                            .into_pointer_type()
+                            .get_element_type()
+                            .into_struct_type()
+                            .into(),
+                    );
+
+                    // let p = self
+                    //     .builder
+                    //     .build_malloc(
+                    //         ctype
+                    //             .into_pointer_type()
+                    //             .get_element_type()
+                    //             .into_struct_type(),
+                    //         "malloc_t",
+                    //     )
+                    //     .unwrap();
+
                     let tail_data = self
                         .builder
                         .build_load(tail_data.into_pointer_value(), "ll");
                     self.builder.build_store(p, tail_data);
                     p.into()
                 };
-                let head = self
-                    .builder
-                    .build_malloc(
-                        ctype
-                            .into_pointer_type()
-                            .get_element_type()
-                            .into_struct_type(),
-                        "malloc_h",
-                    )
-                    .unwrap();
+                let head = self.malloc(
+                    &ctype
+                        .into_pointer_type()
+                        .get_element_type()
+                        .into_struct_type()
+                        .into(),
+                );
+                // let head = self
+                //     .builder
+                //     .build_malloc(
+                //         ctype
+                //             .into_pointer_type()
+                //             .get_element_type()
+                //             .into_struct_type(),
+                //         "malloc_h",
+                //     )
+                //     .unwrap();
                 let data_ptr = self.builder.build_struct_gep(head, 0, "data").unwrap();
                 self.builder.build_store(data_ptr, data);
                 let flag = self.builder.build_struct_gep(head, 2, "flag").unwrap();
@@ -1038,10 +1108,12 @@ impl<'ctx> CodeGen<'ctx> {
                 self.builder
                     .build_store(is_null_ptr, self.context.bool_type().const_int(0, false));
                 if is_ref {
-                    let ptr = self
-                        .builder
-                        .build_alloca(head.get_type().ptr_type(AddressSpace::Generic), "lh");
-                    self.builder.build_store(ptr, head);
+                    let ptr = self.malloc(&head.get_type().ptr_type(AddressSpace::Generic).into());
+
+                    // let ptr = self
+                    //     .builder
+                    //     .build_alloca(head.get_type().ptr_type(AddressSpace::Generic), "lh");
+                    // self.builder.build_store(ptr, head);
                     ptr.into()
                 } else {
                     head.into()
@@ -1073,9 +1145,10 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap();
                 let ptr = self.builder.build_load(t, "tail");
                 if is_ref {
-                    let n = self
-                        .builder
-                        .build_alloca(ptr.get_type().ptr_type(AddressSpace::Generic), "lf");
+                    let n = self.malloc(&ptr.get_type().ptr_type(AddressSpace::Generic).into());
+                    // let n = self
+                    //     .builder
+                    //     .build_alloca(ptr.get_type().ptr_type(AddressSpace::Generic), "lf");
                     self.builder.build_store(n, ptr);
                     n.into()
                 } else {

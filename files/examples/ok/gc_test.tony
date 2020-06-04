@@ -47,11 +47,11 @@ def test ():
 
         l := make_list(i)
 
-        if i < 20:
+        if i < 1000:
             print_list(l)
         end
         r := revert_list(l)
-        if i < 20:
+        if i < 1000:
             print_list(r)
         end
         if not check_lists(i, l, r):
