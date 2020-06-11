@@ -1,7 +1,7 @@
 [package]
 name = "ntua_tonyc"
-version = "0.1.0"
-authors = ["Dimitris Karagiannis <Dimkar3000@gmail.com>"]
+version = "1.0.0"
+authors = ["Aris Antoniou @arisanto","Dimitris Karagiannis <Dimkar3000@gmail.com>"]
 edition = "2018"
 
 [lib]
@@ -17,3 +17,6 @@ clap = { git = "https://github.com/clap-rs/clap/" }
 name = "tonyc"
 path = "src/main.rs"
 
+[profile.release]
+lto = true
+panic = 'abort'
