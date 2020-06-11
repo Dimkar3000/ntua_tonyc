@@ -55,6 +55,31 @@ impl<'ctx> CodeGen<'ctx> {
         }
     }
 
+    fn malloc_array(
+        &self,
+        ctype: &BasicTypeEnum<'ctx>,
+        array_size: IntValue<'ctx>,
+    ) -> PointerValue<'ctx> {
+        let size = self.typed_size_of(&ctype).unwrap();
+        let array_size = self
+            .builder
+            .build_int_cast(array_size, self.context.i64_type(), "upcast");
+        let total_size = self
+            .builder
+            .build_int_nsw_mul(size, array_size, "total_size");
+        let gc_malloc = self.function_table.lookup("GC_malloc");
+        let d = self
+            .builder
+            .build_call(*gc_malloc.unwrap(), &[total_size.into()], "gcmalloctmp");
+        self.builder
+            .build_bitcast(
+                d.as_any_value_enum().into_pointer_value(),
+                ctype.ptr_type(AddressSpace::Generic),
+                "cast",
+            )
+            .into_pointer_value()
+    }
+
     // Allocates and returns a Pointer to ctype on the heap
     fn malloc(&self, ctype: &BasicTypeEnum<'ctx>) -> PointerValue<'ctx> {
         let size = self.typed_size_of(&ctype).unwrap();
@@ -216,13 +241,6 @@ impl<'ctx> CodeGen<'ctx> {
         let gc_malloc = module.add_function("GC_malloc", gc_malloct, Some(Linkage::ExternalWeak));
         std.insert("GC_malloc".to_owned(), gc_malloc)?;
 
-        let strlent = context.i16_type().fn_type(
-            &[context.i8_type().ptr_type(AddressSpace::Generic).into()],
-            false,
-        );
-        let strlen = module.add_function("strlen", strlent, Some(Linkage::External));
-        std.insert("strlen".to_owned(), strlen)?;
-
         let putit = context
             .void_type()
             .fn_type(&[context.i16_type().as_basic_type_enum()], false);
@@ -233,14 +251,14 @@ impl<'ctx> CodeGen<'ctx> {
         let putbt = context
             .void_type()
             .fn_type(&[context.bool_type().into()], false);
-        let putb = module.add_function("putb", putbt, Some(Linkage::External));
+        let putb = module.add_function("putb", putbt, Some(Linkage::ExternalWeak));
         std.insert("putb".to_owned(), putb)?;
 
         // Function: decl putc (char c)
         let putct = context
             .void_type()
             .fn_type(&[context.i8_type().into()], false);
-        let putc = module.add_function("puti8", putct, Some(Linkage::External));
+        let putc = module.add_function("puti8", putct, Some(Linkage::ExternalWeak));
         std.insert("putc".to_owned(), putc)?;
 
         // Warning(dimkar): This Function has a different name in the c code "putstring", just to void colission with c++ function names
@@ -249,17 +267,17 @@ impl<'ctx> CodeGen<'ctx> {
             &[context.i8_type().ptr_type(AddressSpace::Generic).into()],
             false,
         );
-        let puts = module.add_function("putstring", putst, Some(Linkage::External));
+        let puts = module.add_function("putstring", putst, Some(Linkage::ExternalWeak));
         std.insert("puts".to_owned(), puts)?;
 
         // Function: decl int geti ()
         let getit = context.i16_type().fn_type(&[], false);
-        let geti = module.add_function("geti", getit, Some(Linkage::External));
+        let geti = module.add_function("geti", getit, Some(Linkage::ExternalWeak));
         std.insert("geti".to_owned(), geti)?;
 
         // Function: decl bool getb ()
         let getbt = context.bool_type().fn_type(&[], false);
-        let getb = module.add_function("getb", getbt, Some(Linkage::External));
+        let getb = module.add_function("getb", getbt, Some(Linkage::ExternalWeak));
         std.insert("getb".to_owned(), getb)?;
 
         // Function: decl gets (int n, char[] s)
@@ -270,13 +288,72 @@ impl<'ctx> CodeGen<'ctx> {
             ],
             false,
         );
-        let gets = module.add_function("gets", getst, Some(Linkage::External));
+        let gets = module.add_function("gets", getst, Some(Linkage::ExternalWeak));
         std.insert("gets".to_owned(), gets)?;
 
         // Function: decl char getc ()
         let getct = context.i8_type().fn_type(&[], false);
-        let getc = module.add_function("getcchar", getct, Some(Linkage::External));
+        let getc = module.add_function("getcchar", getct, Some(Linkage::ExternalWeak));
         std.insert("getc".to_owned(), getc)?;
+
+        // int strlen(char[] s)
+        let strlent = context.i16_type().fn_type(
+            &[context.i8_type().ptr_type(AddressSpace::Generic).into()],
+            false,
+        );
+        let strlen = module.add_function("strlen", strlent, Some(Linkage::External));
+        std.insert("strlen".to_owned(), strlen)?;
+
+        // Function: decl int strcmp(char[]s1,s2)
+        let strcmpt = context.i16_type().fn_type(
+            &[
+                context.i8_type().ptr_type(AddressSpace::Generic).into(),
+                context.i8_type().ptr_type(AddressSpace::Generic).into(),
+            ],
+            false,
+        );
+        let strcmp = module.add_function("strcmp", strcmpt, Some(Linkage::ExternalWeak));
+        std.insert("strcmp", strcmp)?;
+
+        // decl strcpy (char[] trg, src)
+        let strcpyt = context.i16_type().fn_type(
+            &[
+                context.i8_type().ptr_type(AddressSpace::Generic).into(),
+                context.i8_type().ptr_type(AddressSpace::Generic).into(),
+            ],
+            false,
+        );
+        let strcpy = module.add_function("strcpy", strcpyt, Some(Linkage::ExternalWeak));
+        std.insert("strcpy", strcpy)?;
+
+        // decl strcat (char[] trg, src)
+        let strcatt = context.i16_type().fn_type(
+            &[
+                context.i8_type().ptr_type(AddressSpace::Generic).into(),
+                context.i8_type().ptr_type(AddressSpace::Generic).into(),
+            ],
+            false,
+        );
+        let strcat = module.add_function("strcat", strcatt, Some(Linkage::ExternalWeak));
+        std.insert("strcat", strcat)?;
+
+        let abst = context
+            .i16_type()
+            .fn_type(&[context.i16_type().into()], false);
+        let abs = module.add_function("_abs", abst, Some(Linkage::ExternalWeak));
+        std.insert("abs", abs)?;
+
+        let ordt = context
+            .i16_type()
+            .fn_type(&[context.i8_type().into()], false);
+        let ord = module.add_function("ord", ordt, Some(Linkage::ExternalWeak));
+        std.insert("ord", ord)?;
+
+        let chrt = context
+            .i8_type()
+            .fn_type(&[context.i16_type().into()], false);
+        let chr = module.add_function("chr", chrt, Some(Linkage::ExternalWeak));
+        std.insert("chr", chr)?;
 
         Ok(CodeGen {
             context,
@@ -569,7 +646,6 @@ impl<'ctx> CodeGen<'ctx> {
         }
         // Variables
         for i in &func.vars {
-            println!("type: {}", i.var_type);
             let t = self.typedecl_to_type(&i.var_type);
             let p = match &i.var_type {
                 TypeDecl::List(_) => self.create_typed_nil(&t, true).into_pointer_value(),
@@ -577,8 +653,6 @@ impl<'ctx> CodeGen<'ctx> {
                     .builder
                     .build_alloca(t, &format!("{}_{}", func.header.name, i.name)),
             };
-            println!("t: {:?}", t);
-            println!("p: {:?}", p);
             var_list.insert(i.name.clone(), p);
         }
         self.ctx_mapping
@@ -1199,10 +1273,7 @@ impl<'ctx> CodeGen<'ctx> {
                 };
                 let size = self.compile_exp(exp, false, var_list);
                 assert!(size.is_int_value());
-                self.builder
-                    .build_array_malloc(t, size.into_int_value(), "new_array")
-                    .unwrap()
-                    .into()
+                self.malloc_array(&t, size.into_int_value()).into()
             }
             Expr::Binary(t, x, y) => {
                 let x = self

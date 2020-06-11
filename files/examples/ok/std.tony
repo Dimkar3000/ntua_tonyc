@@ -1,0 +1,66 @@
+def main():
+    char[] orig, a, b
+    int c
+    bool test
+    char ch
+    
+    puts("STARTING TEST\n\n")
+    puts("Give me the length of the string you want to enter: ")
+    c := geti() + 1
+    puts("Type the String: ")
+    orig := new char[c]
+    a := new char[c*2]
+    gets(c,orig)
+    
+    
+    strcpy(a,orig)
+    puts("Test: strcpy, copying \"")
+    puts(orig)
+    puts("\" into variable \'a\'\n\t")
+    puts("a = ")
+    puts(a)
+    puts("\n\n")
+
+    c := strlen(a)
+    puts("TEST: strlen, pass if next line is the length of \'a\'\n\tresult = ")
+    puti(c)
+    puts("\n\n")
+    
+    test := strcmp(a,orig) = 0
+    puts("TEST: strcmp, next line should be \"strcmp(a,\"")
+    puts(orig)
+    puts("\") = 0\"\n\tresult = ")
+    putb(test)
+    puts("\n\n")
+    
+    puts("TEST: strcat, next line should be \"")
+    puts(orig)
+    puts(orig)
+    puts("\"\n\tresult = ")
+    strcat(a,orig)
+    puts(a)
+    puts("\n\n")
+
+    puts("TEST: abs, number = -1\n\tresult = ")
+    c := abs(-1)
+    puti(c)
+    puts("\n\n")
+
+    puts("TEST: trying to convert between char and int\n")
+    puts("Give me a character: ")
+    ch := getc()
+    puts("\n\t starting with: ")
+    putc(ch)
+    c := ord(ch)
+    puts("\n\t the ascii value: ")
+    puti(c)
+    puts("\n\t converting back and got the value: ")
+    ch := chr(c)
+    putc(ch)
+    puts("\n\n")
+
+    puts("If all the above are corrent then the library works\n")
+    puts("Not tested reading functions\n")
+    
+    
+end

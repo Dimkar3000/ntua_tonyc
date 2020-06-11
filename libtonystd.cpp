@@ -4,6 +4,22 @@
 #include <limits>
 #include <ios>
 
+// This forces the std abs to clear the upperbits
+extern "C" int16_t _abs(int16_t a)
+{
+    return abs(a);
+}
+
+extern "C" int16_t ord(char c)
+{
+    return c;
+}
+
+extern "C" char chr(int16_t a)
+{
+    return a;
+}
+
 extern "C" void
 puti(int16_t a)
 {
