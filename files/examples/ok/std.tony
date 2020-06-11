@@ -1,17 +1,16 @@
 def main():
     char[] orig, a, b
     int c
-    bool test
+    bool test,bb
     char ch
     
     puts("STARTING TEST\n\n")
     puts("Give me the length of the string you want to enter: ")
     c := geti() + 1
-    puts("Type the String: ")
+    puts("Type the string: ")
     orig := new char[c]
     a := new char[c*2]
     gets(c,orig)
-    
     
     strcpy(a,orig)
     puts("Test: strcpy, copying \"")
@@ -59,8 +58,14 @@ def main():
     putc(ch)
     puts("\n\n")
 
+    puts("TEST: reading a bool: ")
+    bb := getb()
+    puts("\tresult = ")
+    putb(bb)
+    puts("\n\n")
+
     puts("If all the above are corrent then the library works\n")
-    puts("Not tested reading functions\n")
+    
     
     
 end

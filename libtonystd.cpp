@@ -1,8 +1,32 @@
+#ifdef _WIN32
+#pragma comment(lib, "user32")
+#endif
+
 #include <iostream>
 #include <string>
 #include <algorithm>
 #include <limits>
 #include <ios>
+
+extern "C" void _strcat(char *dest, char *source)
+{
+    strcat(dest, source);
+}
+
+extern "C" int16_t _strcmp(char *dest, char *source)
+{
+    return strcmp(dest, source);
+}
+
+extern "C" int16_t _strlen(char *str)
+{
+    return strlen(str);
+}
+
+extern "C" void _strcpy(char *dest, char *source)
+{
+    strcpy(dest, source);
+}
 
 // This forces the std abs to clear the upperbits
 extern "C" int16_t _abs(int16_t a)
@@ -66,14 +90,15 @@ extern "C" int16_t geti()
 extern "C" char getcchar()
 {
     std::cin.clear();
-    return std::cin.get();
+    char c = std::cin.get();
+    std::cin.clear();
+    return c;
 }
 
 extern "C" bool getb()
 {
-    std::cin.clear();
     std::string data;
-    std::getline(std::cin, data);
+    std::cin >> data;
     if (data[0] == 't' || data[0] == 'T')
     {
         return true;

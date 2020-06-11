@@ -301,7 +301,7 @@ impl<'ctx> CodeGen<'ctx> {
             &[context.i8_type().ptr_type(AddressSpace::Generic).into()],
             false,
         );
-        let strlen = module.add_function("strlen", strlent, Some(Linkage::External));
+        let strlen = module.add_function("_strlen", strlent, Some(Linkage::External));
         std.insert("strlen".to_owned(), strlen)?;
 
         // Function: decl int strcmp(char[]s1,s2)
@@ -312,7 +312,7 @@ impl<'ctx> CodeGen<'ctx> {
             ],
             false,
         );
-        let strcmp = module.add_function("strcmp", strcmpt, Some(Linkage::ExternalWeak));
+        let strcmp = module.add_function("_strcmp", strcmpt, Some(Linkage::ExternalWeak));
         std.insert("strcmp", strcmp)?;
 
         // decl strcpy (char[] trg, src)
@@ -323,18 +323,18 @@ impl<'ctx> CodeGen<'ctx> {
             ],
             false,
         );
-        let strcpy = module.add_function("strcpy", strcpyt, Some(Linkage::ExternalWeak));
+        let strcpy = module.add_function("_strcpy", strcpyt, Some(Linkage::ExternalWeak));
         std.insert("strcpy", strcpy)?;
 
         // decl strcat (char[] trg, src)
-        let strcatt = context.i16_type().fn_type(
+        let strcatt = context.void_type().fn_type(
             &[
                 context.i8_type().ptr_type(AddressSpace::Generic).into(),
                 context.i8_type().ptr_type(AddressSpace::Generic).into(),
             ],
             false,
         );
-        let strcat = module.add_function("strcat", strcatt, Some(Linkage::ExternalWeak));
+        let strcat = module.add_function("_strcat", strcatt, Some(Linkage::ExternalWeak));
         std.insert("strcat", strcat)?;
 
         let abst = context
