@@ -1123,7 +1123,7 @@ impl<'ctx> CodeGen<'ctx> {
                     && tail_data.into_pointer_value().is_null()
                     && tail_data.into_pointer_value().is_const()
                 {
-                    self.create_typed_nil(&ctype, true)
+                    self.create_typed_nil(&ctype, false)
                 } else {
                     let p = self.malloc(
                         &ctype
@@ -1219,7 +1219,7 @@ impl<'ctx> CodeGen<'ctx> {
                     .unwrap();
                 let ptr = self.builder.build_load(t, "tail");
                 if is_ref {
-                    let n = self.malloc(&ptr.get_type().ptr_type(AddressSpace::Generic).into());
+                    let n = self.malloc(&ptr.get_type());
                     // let n = self
                     //     .builder
                     //     .build_alloca(ptr.get_type().ptr_type(AddressSpace::Generic), "lf");
