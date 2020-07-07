@@ -288,7 +288,7 @@ impl<'ctx> CodeGen<'ctx> {
             ],
             false,
         );
-        let gets = module.add_function("gets", getst, Some(Linkage::ExternalWeak));
+        let gets = module.add_function("_gets", getst, Some(Linkage::ExternalWeak));
         std.insert("gets".to_owned(), gets)?;
 
         // Function: decl char getc ()

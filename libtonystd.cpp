@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <limits>
 #include <ios>
+#include <cstring>
 
 extern "C" void _strcat(char *dest, char *source)
 {
@@ -64,7 +65,7 @@ extern "C" void putstring(char *s)
     std::cout << s;
 }
 
-extern "C" void gets(int16_t n, char *s)
+extern "C" void _gets(int16_t n, char *s)
 {
     std::cin.clear();
     if (s == 0)
