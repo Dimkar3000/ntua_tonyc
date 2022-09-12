@@ -1,29 +1,28 @@
 # Σκοπός
 
-Η δημιουργεία ενός compiler για την γλώσσα 'Tony' που δόθηκε ως εργασία στος μαθητές του ECE NTUA για το μάθημα των compilers το έτος 2020.
+Η δημιουργία ενός compiler για την γλώσσα 'Tony' που δόθηκε ως εργασία στους μαθητές του ECE NTUA για το μάθημα των compilers το έτος 2020.
 
 # Η γλώσσα Tony
 
 Μια απλή γλώσσα προστακτικού προγραμματισμού. Τα κύρια χαρακτηριστικά της εν συντομία είναι τα εξής:
 
-- Απλή δομή και σύνταξη εντολών και εκφράσεων που μοιάζει με αυτήν κάποιων γλωσσών σενα5 ρίων.
-- Βασικοί τύποι δεδομένων για λογικές τιμές, χαρακτήρες, ακέραιους αριθμούς, μονοδιάστατους
-  7 πίνακες και λίστες.
+- Απλή δομή και σύνταξη εντολών και εκφράσεων που μοιάζει με αυτήν κάποιων γλωσσών σεναρίων.
+- Βασικοί τύποι δεδομένων για λογικές τιμές, χαρακτήρες, ακέραιους αριθμούς, μονοδιάστατους πίνακες και λίστες.
 - Απλές συναρτήσεις, πέρασμα κατ’ αξία ή κατ’ αναφορά.
 - Εμβέλεια μεταβλητών όπως στην Pascal.
 - Βιβλιοθήκη συναρτήσεων.
 
-Στο φάκελο `files` υπάρχει η εκφώνησει της άσκησης μαζί με ότι άλλο δόθηκε για την εργασία. Επίσης έχει τον φάκελο `examples` με προγράμματα που μπορούν να γίνουν compile ή που γυρνάε συσγεκριμένα errors.
+Στο φάκελο `files` υπάρχει η εκφώνηση της άσκησης μαζί με ότι άλλο δόθηκε για την εργασία. Επίσης, έχει τον φάκελο `examples` με προγράμματα που μπορούν να γίνουν compile ή που γυρνάνε συγκεκριμένα errors.
 
-# Installing
+# Εγκατάσταση
 
-## Requirements
+## Προαπετούμενα
 
 - Rust
 - LLVM 10
-- The **Boehm-Demers-Weiser** garbage collector
+- Τον **Boehm-Demers-Weiser** garbage collector
 
-You will need rust on your machine in order be able to compile this project. You will need either to add the `LLVM_SYS_100_PREFIX=/llvm/path/` to your path (Windows) or run cargo like this:
+Θα χρειαστείς να έχεις την rust εγκαταστημένη στο σύστημα σου για να κάνεις compile το project. Επίσης, θα χρειαστείς την μεταβλητή `LLVM_SYS_100_PREFIX=/llvm/path/` στο path (Windows) ή να τρέξεις το cargo έτσι:
 
 ```bash
 cd your/crate/path
@@ -41,17 +40,7 @@ LLVM_SYS_100_PREFIX=llvm-10.0.0.src\build\install cargo build
 - I am not sure if you need to compile llvm but I haven't tested the project with Release binaries. Technicaly the only requirements are a llvm installation with llvm-config.
 - You can install the collector with your package manager (libgc). If you build from **_source_** run make with **_"root"_** so the linker can find it in a global library directory
 
-# Todo List
-
-- [x] Λεκτικός αναλυτής
-- [x] Συντακτικός αναλυτής
-- [x] Σημασιολογικός αναλυτής
-- [x] Ενδιάμεσος κώδικας
-- [x] Τελικός κώδικας
-- [x] Βελτιστοποίηση
-- [x] Καθάρισμα codebase
-
-# TroubleShooting
+# Προβλήματα (English)
 
 1. In case of linking errors look at the clink file of your platform.
 
